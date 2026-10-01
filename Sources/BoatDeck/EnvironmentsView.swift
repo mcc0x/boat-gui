@@ -218,15 +218,15 @@ struct EnvironmentDetail: View {
     var accessSection: some View {
                 section("Access", "lock.shield") {
                     VStack(spacing: 10) {
-                        flagToggle("GitHub access", "Pass your GitHub login so private repos clone", key: "passGithub", cliFlag: "--github", topLevel: true)
+                        flagToggle("GitHub access", "Pass your GitHub login so private repos clone", key: "passGithub", topLevel: true)
                         Hairline()
-                        flagToggle("Account secrets", "Expose your saved secrets", key: "passSecrets", cliFlag: "--secrets", topLevel: true)
+                        flagToggle("Account secrets", "Expose your saved secrets", key: "passSecrets", topLevel: true)
                         Hairline()
-                        flagToggle("Sandbox credentials", "Pass boat credentials into the sandbox", key: "passSandboxCredentials", cliFlag: "", topLevel: true)
+                        flagToggle("Sandbox credentials", "Pass boat credentials into the sandbox", key: "passSandboxCredentials", topLevel: true)
                         Hairline()
-                        flagToggle("Agent credentials", "Pass Claude Code / Codex logins to agents", key: "passAgentsCredentials", cliFlag: "", topLevel: true)
+                        flagToggle("Agent credentials", "Pass Claude Code / Codex logins to agents", key: "passAgentsCredentials", topLevel: true)
                         Hairline()
-                        flagToggle("Safe for third parties", "Allow sharing with collaborators", key: "safeForThirdParties", cliFlag: "--safe-for-third-parties", topLevel: true)
+                        flagToggle("Safe for third parties", "Allow sharing with collaborators", key: "safeForThirdParties", topLevel: true)
                     }
                 }
     }
@@ -283,7 +283,7 @@ struct EnvironmentDetail: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
-    func flagToggle(_ label: String, _ sub: String, key: String, cliFlag: String, topLevel: Bool = false) -> some View {
+    func flagToggle(_ label: String, _ sub: String, key: String, topLevel: Bool = false) -> some View {
         let current = (topLevel ? env.json[key] : flags[key])?.bool ?? false
         return HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 1) {
@@ -296,12 +296,8 @@ struct EnvironmentDetail: View {
                     var body: [String: JSON] = [:]
                     if topLevel { body[key] = .bool(v) } else { body["flags"] = .object([key: .bool(v)]) }
                     let msg = "\(label) \(v ? "on" : "off")"
-                    if cliFlag.isEmpty {
-                        await state.run(msg, refresh: false) { try await $0.updateEnvironment(envId, .object(body)) }
-                    } else {
-                        await state.runAction(msg) {
-                            try await $0.updateEnvironment(envId, .object(body))
-                        }
+                    await state.runAction(msg) {
+                        try await $0.updateEnvironment(envId, .object(body))
                     }
                     await reload()
                 }
@@ -321,11 +317,12 @@ struct EnvironmentDetail: View {
     func addSecretFile() {
         let panel = NSOpenPanel()
         panel.showsHiddenFiles = true
-        guard panel.runModal() == .OK, let url = panel.url, let data = try? Data(contentsOf: url) else { return }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
         guard let dest = promptText("Path inside the sandbox", default: url.lastPathComponent) else { return }
         Task {
             await state.runAction("Secret file added") {
-                try await $0.setSecretFile(envId, path: dest, contents: data)
+                let data = try await LocalFiles.read(url, limit: LocalFiles.uploadLimit)
+                return try await $0.setSecretFile(envId, path: dest, contents: data)
             }
             await reload()
         }

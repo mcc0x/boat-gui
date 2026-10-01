@@ -34,6 +34,7 @@ func expectThrows(_ work: () throws -> Void) throws {
         try testCredentialPersistence()
         try await testProcesses()
         try testEventPagination()
-        print("API, logging, credential and process regression checks passed.")
+        try await testLocalFiles()
+        print("All regression checks passed.")
     }
 }

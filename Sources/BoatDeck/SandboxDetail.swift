@@ -345,10 +345,11 @@ struct OverviewTab: View {
 
     func downloadArtifacts() async {
         do {
-            let (data, resp) = try await state.api.artifacts(id)
+            let (file, resp) = try await state.api.artifacts(id)
+            defer { try? FileManager.default.removeItem(at: file) }
             let panel = NSSavePanel()
             panel.nameFieldStringValue = resp.suggestedFilename ?? "\(id)-artifacts.tar"
-            if panel.runModal() == .OK, let url = panel.url { try data.write(to: url); state.toast("Saved \(url.lastPathComponent)") }
+            if panel.runModal() == .OK, let url = panel.url { try await LocalFiles.saveDownload(file, to: url); state.toast("Saved \(url.lastPathComponent)") }
         } catch { state.toast("Artifacts failed — \(error.localizedDescription)", error: true) }
     }
 }

@@ -97,24 +97,39 @@ final class BoatAPI: @unchecked Sendable {
         return json ?? .object(["raw": .string(String(decoding: data, as: UTF8.self))])
     }
 
-    /// Raw bytes (used for file downloads).
+    /// Preview-sized reads. Downloads use a file URL instead of holding the entire file in RAM.
     func raw(_ method: String, _ path: String, query: [String: String?] = [:]) async throws -> (Data, HTTPURLResponse) {
-        let req = try makeRequest(method, path, query: query)
+        let (file, response) = try await download(method, path, query: query)
+        defer { try? FileManager.default.removeItem(at: file) }
+        return (try await LocalFiles.read(file, limit: LocalFiles.previewLimit), response)
+    }
+
+    /// The caller owns the returned temporary file and removes it after saving or cancelling.
+    func download(_ method: String, _ path: String, query: [String: String?] = [:]) async throws -> (URL, HTTPURLResponse) {
+        let request = try makeRequest(method, path, query: query)
         let started = Date()
-        let (data, resp) = try await session.data(for: req)
-        guard let http = resp as? HTTPURLResponse else { throw BoatError(status: 0, code: nil, message: "No response") }
-        Trace.log(method, path, http.statusCode, bytes: data.count, duration: Date().timeIntervalSince(started))
+        let (temporary, response) = try await session.download(for: request)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        try Task.checkCancellation()
+        guard let http = response as? HTTPURLResponse else { throw BoatError(status: 0, code: nil, message: "No response") }
+        let size = (try? temporary.resourceValues(forKeys: [.fileSizeKey]))?.fileSize
+        Trace.log(method, path, http.statusCode, bytes: size, duration: Date().timeIntervalSince(started))
         if http.statusCode >= 400 {
-            let j = JSON.parse(data)
-            throw BoatError(status: http.statusCode, code: j?["code"]?.string,
-                            message: j?["message"]?.string ?? String(decoding: data.prefix(300), as: UTF8.self))
+            let handle = try FileHandle(forReadingFrom: temporary)
+            defer { try? handle.close() }
+            let data = try handle.read(upToCount: 500) ?? Data()
+            let json = JSON.parse(data)
+            throw BoatError(status: http.statusCode, code: json?["code"]?.string,
+                message: json?["message"]?.string ?? json?["error"]?["message"]?.string ?? "Download failed")
         }
-        return (data, http)
+        let owned = FileManager.default.temporaryDirectory.appendingPathComponent("boatdeck-download-" + UUID().uuidString)
+        try FileManager.default.moveItem(at: temporary, to: owned)
+        return (owned, http)
     }
 
     /// Streams NDJSON lines (events, streamed commands).
     func stream(_ method: String, _ path: String, query: [String: String?] = [:], body: JSON? = nil) -> AsyncThrowingStream<JSON, Error> {
-        AsyncThrowingStream { continuation in
+        AsyncThrowingStream(bufferingPolicy: .bufferingNewest(256)) { continuation in
             let task = Task {
                 do {
                     var req = try makeRequest(method, path, query: query, body: body)
@@ -220,7 +235,10 @@ final class BoatAPI: @unchecked Sendable {
         try await call("PUT", sb(id) + "/files",
                        body: ["path": .string(path), "content": .string(data.base64EncodedString()), "encoding": "base64"])
     }
-    func artifacts(_ id: String) async throws -> (Data, HTTPURLResponse) { try await raw("GET", sb(id) + "/artifacts") }
+    func downloadFile(_ id: String, path: String) async throws -> (URL, HTTPURLResponse) {
+        try await download("GET", sb(id) + "/files", query: ["path": path])
+    }
+    func artifacts(_ id: String) async throws -> (URL, HTTPURLResponse) { try await download("GET", sb(id) + "/artifacts") }
     func desktop(_ id: String) async throws -> JSON { try await call("POST", sb(id) + "/desktop") }
     func addSSHKey(_ id: String, publicKey: String) async throws -> JSON {
         try await call("POST", sb(id) + "/sshkey", body: ["publicKey": .string(publicKey), "key": .string(publicKey)])

@@ -115,7 +115,7 @@ struct TerminalView: View {
                     .onKeyPress(.upArrow) { recall(-1); return .handled }
                     .onKeyPress(.downArrow) { recall(1); return .handled }
                 if running {
-                    Button("Stop") { task?.cancel(); lines.append(TermLine(kind: .meta, text: "^C (stopped watching)")) }
+                    Button("Stop") { task?.cancel(); addLine(TermLine(kind: .meta, text: "^C (stopped watching)")) }
                         .bdButton(.danger, .small)
                 } else {
                     Button { runIt() } label: {
@@ -134,7 +134,7 @@ struct TerminalView: View {
                     Button("Status") {
                         Task {
                             if let r = try? await state.api.commandStatus(id, pid: detachedPid) {
-                                lines.append(TermLine(kind: .meta, text: r.pretty))
+                                addLine(TermLine(kind: .meta, text: r.pretty))
                             }
                         }
                     }.bdButton(.ghost, .small)
@@ -168,15 +168,30 @@ struct TerminalView: View {
         histIndex = nil
     }
 
+    func addLine(_ line: TermLine) {
+        var bounded = line
+        bounded.text = String(line.text.suffix(20_000))
+        lines.append(bounded)
+        trimOutput()
+    }
+
+    func trimOutput() {
+        var characters = lines.reduce(0) { $0 + $1.text.count }
+        while lines.count > 1000 || characters > 250_000 {
+            characters -= lines.removeFirst().text.count
+        }
+    }
+
     func out(_ s: String, err: Bool = false) {
         let clean = stripANSI(s)
         guard !clean.isEmpty else { return }
         let kind: TermLine.Kind = err ? .err : .out
         // Stored text keeps its newlines; a chunk continues the previous line only if that line is unterminated.
         if let last = lines.last, last.kind == kind, !last.text.hasSuffix("\n"), last.text.count < 20000 {
-            lines[lines.count - 1].text += clean
+            lines[lines.count - 1].text = String((lines[lines.count - 1].text + clean).suffix(20_000))
+            trimOutput()
         } else {
-            lines.append(TermLine(kind: kind, text: clean))
+            addLine(TermLine(kind: kind, text: clean))
         }
     }
 
@@ -186,7 +201,7 @@ struct TerminalView: View {
         if cmd == "clear" { lines.removeAll(); command = ""; return }
         pushHistory(cmd)
         command = ""
-        lines.append(TermLine(kind: .cmd, text: cmd))
+        addLine(TermLine(kind: .cmd, text: cmd))
         running = true
         task = Task {
             defer { running = false }
@@ -195,7 +210,7 @@ struct TerminalView: View {
                 case "detached":
                     let r = try await state.api.execDetached(id, command: cmd, cwd: cwd)
                     detachedPid = r.first("processId", "pid")?.string ?? ""
-                    lines.append(TermLine(kind: .meta, text: "started detached process \(detachedPid)"))
+                    addLine(TermLine(kind: .meta, text: "started detached process \(detachedPid)"))
                 case "sync":
                     append(try await state.api.exec(id, command: cmd, cwd: cwd, timeout: timeout))
                 default:
@@ -207,7 +222,7 @@ struct TerminalView: View {
                         case "exit": exitLine(ev.first("exitCode", "code")?.int)
                         case "started": break
                         default:
-                            if ev["stdout"] != nil || ev["exitCode"] != nil { append(ev) } else { lines.append(TermLine(kind: .meta, text: ev.compact)) }
+                            if ev["stdout"] != nil || ev["exitCode"] != nil { append(ev) } else { addLine(TermLine(kind: .meta, text: ev.compact)) }
                         }
                     }
                 }
@@ -215,20 +230,20 @@ struct TerminalView: View {
                 // Stop watching never starts another command.
             } catch {
                 guard !Task.isCancelled else { return }
-                lines.append(TermLine(kind: .err, text: "error: \(error.localizedDescription)"))
+                addLine(TermLine(kind: .err, text: "error: \(error.localizedDescription)"))
             }
         }
     }
 
     func exitLine(_ code: Int?) {
-        lines.append(TermLine(kind: .meta, text: code == 0 ? "✓ exit 0" : "✗ exit \(code.map(String.init) ?? "?")"))
+        addLine(TermLine(kind: .meta, text: code == 0 ? "✓ exit 0" : "✗ exit \(code.map(String.init) ?? "?")"))
     }
 
     func append(_ r: JSON) {
         if let o = r.first("stdout", "output")?.string { out(o) }
         if let e = r["stderr"]?.string, !e.isEmpty { out(e, err: true) }
         if let c = r.first("exitCode", "exit_code")?.int { exitLine(c) }
-        if r.first("stdout", "output", "exitCode") == nil { lines.append(TermLine(kind: .meta, text: r.pretty)) }
+        if r.first("stdout", "output", "exitCode") == nil { addLine(TermLine(kind: .meta, text: r.pretty)) }
     }
 }
 
@@ -475,7 +490,12 @@ struct FilesView: View {
 
     func open(_ p: String) async {
         do {
+            if let entry = entries.first(where: { join($0.name) == p }), entry.size > Double(LocalFiles.previewLimit) {
+                state.toast("File too large to preview. Use Download to save it to your Mac.", error: true)
+                return
+            }
             let (data, _) = try await state.api.readFile(id, path: p)
+            try Task.checkCancellation()
             withAnimation(BD.snappy) {
                 openFile = p
                 if let s = String(data: data, encoding: .utf8), data.count < 5_000_000, !data.contains(0) {
@@ -490,8 +510,9 @@ struct FilesView: View {
     func save() async {
         guard let f = openFile else { return }
         do {
-            try await state.api.writeFile(id, path: f, data: Data(fileText.utf8))
-            fileOriginal = fileText
+            let savedText = fileText
+            try await state.api.writeFile(id, path: f, data: Data(savedText.utf8))
+            if openFile == f { fileOriginal = savedText }
             state.toast("Saved \((f as NSString).lastPathComponent)")
         } catch { state.toast("Save failed — \(error.localizedDescription)", error: true) }
     }
@@ -505,9 +526,11 @@ struct FilesView: View {
     }
 
     func uploadURL(_ u: URL) async {
-        guard let d = try? Data(contentsOf: u) else { return }
+        let client = state.api
         do {
-            try await state.api.writeFile(id, path: join(u.lastPathComponent), data: d)
+            let d = try await LocalFiles.read(u, limit: LocalFiles.uploadLimit)
+            guard state.api === client, !Task.isCancelled else { return }
+            try await client.writeFile(id, path: join(u.lastPathComponent), data: d)
             state.toast("Uploaded \(u.lastPathComponent)")
             await list()
         } catch { state.toast("Upload failed — \(error.localizedDescription)", error: true) }
@@ -515,9 +538,15 @@ struct FilesView: View {
 
     func download(_ n: String) async {
         do {
-            let (data, resp) = try await state.api.readFile(id, path: join(n))
+            let (file, resp) = try await state.api.downloadFile(id, path: join(n))
+            defer { try? FileManager.default.removeItem(at: file) }
             let isDir = (resp.value(forHTTPHeaderField: "X-Snapshot-Entry-Kind") ?? "") == "dir"
-            saveData(data, name: isDir ? n + ".tar" : n)
+            let panel = NSSavePanel()
+            panel.nameFieldStringValue = isDir ? n + ".tar" : n
+            if panel.runModal() == .OK, let destination = panel.url {
+                try await LocalFiles.saveDownload(file, to: destination)
+                state.toast("Saved \(destination.lastPathComponent)")
+            }
         } catch { state.toast("Download failed — \(error.localizedDescription)", error: true) }
     }
 
@@ -542,7 +571,13 @@ struct FilesView: View {
         Task { await sh("rm -rf \(shq(join(n)))", "Deleted") }
     }
     func sh(_ cmd: String, _ ok: String) async {
-        await state.run(ok, refresh: false) { try await $0.exec(id, command: cmd, cwd: nil) }
+        await state.run(ok, refresh: false) {
+            let result = try await $0.exec(id, command: cmd, cwd: nil)
+            guard result.first("exitCode", "exit_code")?.int == 0 else {
+                throw BoatError(status: 0, code: "command_failed", message: result["stderr"]?.string ?? "File operation failed.")
+            }
+            return result
+        }
         await list()
     }
 }
