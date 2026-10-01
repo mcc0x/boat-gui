@@ -24,6 +24,9 @@ func expectThrows(_ work: () throws -> Void) throws {
 
 @main struct TestMain {
     static func main() async throws {
+        try expectNil(JSON.string("nan").int)
+        try expectNil(JSON.number(1e100).int)
+        try expectEqual(JSON.number(2.9).int, 2)
         let api = APITests()
         try await api.testOpaquePathComponents()
         try await api.testFileWriteFailureDoesNotExecuteFallbackCommand()

@@ -163,6 +163,8 @@ struct GeneralPane: View {
 struct AccountPane: View {
     @EnvironmentObject var state: AppState
     @VState private var key = ""
+    @VState private var endpoint = ""
+    @VState private var organization = ""
     @VState private var testing = false
     var masked: String {
         let k = state.apiKey
@@ -190,12 +192,17 @@ struct AccountPane: View {
         }
         SettingsGroup(title: "Endpoint") {
             SettingsRow(title: "API base URL", icon: "network") {
-                Field(placeholder: "https://boat.dev/api/v1", text: $state.apiURL, mono: true).frame(width: 260)
+                Field(placeholder: "https://boat.dev/api/v1", text: $endpoint, mono: true).frame(width: 260)
             }
             SettingsRow(title: "Organization", sub: "Bill against an org wallet (leave empty for your active wallet).", icon: "building.2", last: true) {
-                Field(placeholder: "org name or id", text: $state.org).frame(width: 200)
+                Field(placeholder: "org name or id", text: $organization).frame(width: 200)
+            }
+            SettingsRow(title: "Apply connection", sub: "Your API key is sent to the selected server.", icon: "checkmark.circle", last: true) {
+                Button("Save endpoint") { state.configureConnection(url: endpoint, organization: organization) }
+                    .bdButton(.primary, .small)
             }
         }
+        .onAppear { endpoint = state.apiURL; organization = state.org }
         SettingsGroup {
             SettingsRow(title: "Sign out", sub: "Removes the saved API key from this Mac.", icon: "rectangle.portrait.and.arrow.right", last: true) {
                 Button("Sign out") {

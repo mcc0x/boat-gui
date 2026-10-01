@@ -161,6 +161,16 @@ final class AppState: ObservableObject {
         return true
     }
 
+    func configureConnection(url: String, organization: String) {
+        let endpoint = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            let candidate = BoatAPI(baseURL: endpoint, apiKey: apiKey.isEmpty ? "validation-only" : apiKey)
+            _ = try candidate.makeRequest("GET", "/me")
+            apiURL = endpoint
+            org = organization.trimmingCharacters(in: .whitespacesAndNewlines)
+        } catch { toast(error.localizedDescription, error: true) }
+    }
+
     func signOut() async {
         // Save the empty marker first; do not claim success if persistence fails.
         guard setAPIKey("") else { return }

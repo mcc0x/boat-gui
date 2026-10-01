@@ -62,7 +62,7 @@ enum JSON: Codable, Hashable {
         default: return nil
         }
     }
-    var int: Int? { double.map { Int($0) } }
+    var int: Int? { double.flatMap { Int(exactly: $0.rounded(.towardZero)) } }
     var bool: Bool? {
         switch self {
         case .bool(let b): return b
@@ -143,6 +143,6 @@ func relative(_ iso: String?) -> String {
 }
 
 func byteString(_ n: Double?) -> String {
-    guard let n else { return "—" }
-    return ByteCountFormatter.string(fromByteCount: Int64(n), countStyle: .file)
+    guard let n, let count = Int64(exactly: n.rounded(.towardZero)) else { return "—" }
+    return ByteCountFormatter.string(fromByteCount: count, countStyle: .file)
 }
