@@ -42,17 +42,19 @@ struct SandboxesView: View {
         WidthReader { w in
             Group {
                 if let id = state.selectedSandbox {
-                    HStack(spacing: 0) {
+                    Group {
                         if w >= 980 {
-                            compactList.frame(width: 248)
-                                .transition(.move(edge: .leading).combined(with: .opacity))
-                            Rectangle().fill(BD.stroke).frame(width: 1)
+                            HSplitView {
+                                compactList.frame(minWidth: 200, idealWidth: 240, maxWidth: 300)
+                                SandboxDetailView(sandboxId: id)
+                                    .frame(minWidth: 450, maxWidth: .infinity)
+                                    .layoutPriority(1)
+                                    .id(id)
+                            }
+                        } else {
+                            SandboxDetailView(sandboxId: id, showBack: true).id(id)
                         }
-                        SandboxDetailView(sandboxId: id, showBack: w < 980)
-                            .id(id)
-                            .transition(.identity)
                     }
-                    .animation(BD.spring, value: w >= 980)
                 } else {
                     overview
                 }
@@ -146,7 +148,8 @@ struct SandboxesView: View {
             }
             .scrollContentBackground(.hidden)
         }
-        .padding(.horizontal, 12).padding(.top, 40).padding(.bottom, 12)
+        .padding(.horizontal, 12).padding(.top, 22).padding(.bottom, 12)
+        .background(BD.surface.opacity(0.5))
     }
 }
 
@@ -159,7 +162,7 @@ struct CompactRow: View {
             StatusDot(state: s.state, size: 7)
             VStack(alignment: .leading, spacing: 1) {
                 Text(s.displayName).font(.system(size: 12.5, weight: .medium)).foregroundStyle(BD.text).lineLimit(1)
-                Text("\(s.state) · \(s.machineType)").font(.system(size: 10.5)).foregroundStyle(BD.text3).lineLimit(1)
+                Text("\(s.state) · \(s.machineType)").font(.system(size: 11.5)).foregroundStyle(BD.text2).lineLimit(1)
             }
             Spacer()
         }

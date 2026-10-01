@@ -31,8 +31,8 @@ struct SandboxDetailView: View {
             let gutter: CGFloat = w < 640 ? 18 : 28
             VStack(alignment: .leading, spacing: 0) {
                 header(w)
-                    .padding(.horizontal, gutter).padding(.top, 40).padding(.bottom, 18)
-                UnderlineTabs(tabs: DetailTab.allCases, selection: $tab, iconsOnly: w < 700)
+                    .padding(.horizontal, gutter).padding(.top, 22).padding(.bottom, 18)
+                UnderlineTabs(tabs: DetailTab.allCases, selection: $tab, iconsOnly: w < 580)
                     .padding(.horizontal, gutter)
                 Hairline()
                 Group {
@@ -129,6 +129,7 @@ struct UnderlineTabs: View {
                 }
                 .buttonStyle(.plain)
                 .help(t.rawValue)
+                .accessibilityLabel(t.rawValue)
             }
             Spacer(minLength: 0)
         }
@@ -181,7 +182,13 @@ struct OverviewTab: View {
     @VState private var usage: JSON?
     @VState private var error: String?
     @VState private var now = Date()
+    @VState private var showTechnicalDetails = false
     let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
+    var isStopped: Bool {
+        let status = state.sandboxes.first { $0.id == id }?.state ?? detail?["state"]?.string ?? "unknown"
+        return ["archived", "stopped", "paused", "archiving"].contains(status)
+    }
 
     var created: Date? { Date.fromISO(detail?.first("createdAt")?.string) }
     var deadline: Date? { Date.fromISO(detail?.first("archiveAfter", "expiresAt", "autoStopAt")?.string) }
@@ -199,6 +206,16 @@ struct OverviewTab: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 if let error { Text(error).font(.bdSmall).foregroundStyle(BD.red).textSelection(.enabled) }
+                if let issue = detail?["error"]?.string, !issue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label("Server-reported issue", systemImage: "exclamationmark.triangle")
+                            .font(.bdH3).foregroundStyle(BD.text)
+                        Text(issue).font(.bdSmall).foregroundStyle(BD.text2).textSelection(.enabled)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14)
+                    .background(BD.amber.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
+                }
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 250), spacing: 28, alignment: .top)], alignment: .leading, spacing: 22) {
                     lifetimeCard.appear()
                     usageCard.appear(delay: 0.04)
@@ -213,11 +230,17 @@ struct OverviewTab: View {
                             Button { NSWorkspace.shared.open(url) } label: { Label("Open URL", systemImage: "safari") }.bdButton(.primary)
                         }
                         Button { rename() } label: { Label("Rename", systemImage: "pencil") }.bdButton()
-                        Button { Task { await extend(3600) } } label: { Label("+1 hour", systemImage: "clock.arrow.circlepath") }.bdButton()
-                        Button { Task { await extend(4 * 3600) } } label: { Label("+4 hours", systemImage: "clock.badge.plus") }.bdButton()
-                        Button {
-                            Task { await state.runAction("Auto-stop disabled") { try await $0.updateSandbox(id, ["noAutoStop": true, "ttlSeconds": 0]) }; await load() }
-                        } label: { Label("Keep running", systemImage: "infinity") }.bdButton()
+                        Menu {
+                            Button("Add 1 hour") { Task { await extend(3600) } }
+                            Button("Add 4 hours") { Task { await extend(4 * 3600) } }
+                            Divider()
+                            Button("Keep running") {
+                                Task { await state.runAction("Auto-stop disabled") { try await $0.updateSandbox(id, ["noAutoStop": true, "ttlSeconds": 0]) }; await load() }
+                            }
+                        } label: { Label("Auto-stop", systemImage: "clock") }
+                        .menuStyle(.borderlessButton).fixedSize().tint(BD.text2)
+                        .disabled(isStopped)
+                        .help(isStopped ? "Resume the sandbox to change auto-stop" : "Extend or disable auto-stop")
                         Button { Task { await state.run("Forked") { try await $0.fork(id) } } } label: { Label("Fork", systemImage: "arrow.triangle.branch") }.bdButton()
                         Button {
                             if let n = promptText("Snapshot name", "Named snapshots can seed new sandboxes (boat new --from NAME).") {
@@ -231,12 +254,16 @@ struct OverviewTab: View {
 
                 Hairline()
 
-                FlatSection("Details", icon: "list.bullet.rectangle") {
-                    RawJSONButton(json: detail)
-                } content: {
-                    FieldColumns(json: detail ?? .null)
+                DisclosureGroup(isExpanded: $showTechnicalDetails) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack { Text("All fields returned by Boat").font(.bdSmall).foregroundStyle(BD.text2); Spacer(); RawJSONButton(json: detail) }
+                        FieldColumns(json: detail ?? .null)
+                    }
+                    .padding(.top, 12)
+                } label: {
+                    Label("Technical details", systemImage: "curlybraces").font(.bdBody).foregroundStyle(BD.text2)
                 }
-                .appear(delay: 0.14)
+                .tint(BD.text2)
             }
             .padding(.horizontal, gutter).padding(.top, 24).padding(.bottom, 28)
         }
@@ -251,7 +278,7 @@ struct OverviewTab: View {
             return max(0, min(1, r / window))
         }()
         return HStack(spacing: 14) {
-            RingGauge(value: frac, lineWidth: 7, color: frac < 0.15 ? BD.amber : BD.text).frame(width: 64, height: 64)
+            RingGauge(value: isStopped ? 0 : frac, lineWidth: 5, color: frac < 0.15 ? BD.amber : BD.text2).frame(width: 56, height: 56)
                 .overlay(Image(systemName: neverStops ? "infinity" : "hourglass").font(.system(size: 14)).foregroundStyle(BD.text2))
             VStack(alignment: .leading, spacing: 4) {
                 Eyebrow(text: "Auto-stop")
@@ -265,7 +292,7 @@ struct OverviewTab: View {
     }
 
     var remainingText: String {
-        if ["archived", "stopped", "paused", "archiving"].contains(detail?["state"]?.string ?? "") { return "Stopped" }
+        if isStopped { return "Stopped" }
         if neverStops { return "Never" }
         guard let r = remaining else { return "—" }
         if r <= 0 { return "Stopping" }
@@ -274,6 +301,7 @@ struct OverviewTab: View {
     }
     var uptimeText: String {
         guard let created else { return "uptime —" }
+        if isStopped { return "Created " + created.formatted(date: .abbreviated, time: .omitted) }
         let up = "up \(durationText(now.timeIntervalSince(created)))"
         if let d = deadline { return up + " · stops at " + d.formatted(date: .omitted, time: .shortened) }
         return up
@@ -319,6 +347,7 @@ struct OverviewTab: View {
             .padding(.bottom, 4)
             KVRow(key: "Size", value: [detail?["type"]?.string?.capitalized, detail.map { Record(json: $0).specs }].compactMap { $0 }.joined(separator: " · "))
             KVRow(key: "SSH", value: detail?["sshEndpoint"]?.string, copy: true)
+            KVRow(key: "Environment", value: detail?.first("environment", "environmentName")?.string)
             KVRow(key: "Billing", value: detail?["billingMultiplier"]?.double.map { "\(String(format: "%g", $0))× rate" })
         }
         .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
