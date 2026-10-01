@@ -24,6 +24,12 @@ func testProcesses() async throws {
     task.cancel()
     let cancelled = await task.value
     try expectEqual(cancelled.exitCode, 130)
+    let marker = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: marker) }
+    let descendants = BoatCLI.runSync("/bin/sh", ["-c", "trap '' TERM; (sleep 0.7; echo survived > \(shq(marker.path))) & wait"], timeout: 0.1)
+    try expectEqual(descendants.exitCode, 124)
+    try await Task.sleep(nanoseconds: 750_000_000)
+    try expect(!FileManager.default.fileExists(atPath: marker.path), "A child survived cancellation of the CLI process group")
     var decoder = UTF8Chunks()
     let bytes = Array("A😀éB".utf8)
     var text = ""

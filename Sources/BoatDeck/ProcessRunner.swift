@@ -26,6 +26,9 @@ enum ProcessRunner {
         process.standardOutput = out; process.standardError = err; process.standardInput = input
         do { try process.run() }
         catch { return CLIResult(exitCode: -1, stdout: "", stderr: error.localizedDescription) }
+        // Foundation creates an isolated group on macOS. Verify before ever signalling a group.
+        let pid = process.processIdentifier
+        let group: pid_t? = getpgid(pid) == pid && pid != getpgrp() ? pid : nil
         let outFD = out.fileHandleForReading.fileDescriptor, errFD = err.fileHandleForReading.fileDescriptor
         let inFD = input.fileHandleForWriting.fileDescriptor
         for fd in [outFD, errFD, inFD] { _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK) }
@@ -63,10 +66,12 @@ enum ProcessRunner {
             if stoppedAt == nil && (cancellation.isCancelled || now >= deadline) {
                 stopCode = cancellation.isCancelled ? 130 : 124
                 stoppedAt = now
-                if process.isRunning { process.terminate() }
+                if let group { _ = kill(-group, SIGTERM) }
+                else if process.isRunning { process.terminate() }
             }
-            if let stoppedAt, now - stoppedAt >= 0.3, process.isRunning {
-                _ = kill(process.processIdentifier, SIGKILL)
+            if let stoppedAt, now - stoppedAt >= 0.3 {
+                if let group { _ = kill(-group, SIGKILL) }
+                else if process.isRunning { _ = kill(pid, SIGKILL) }
             }
             drain(outFD, &stdout, &outTruncated, &outDecoder)
             drain(errFD, &stderr, &errTruncated, &errDecoder)
@@ -83,6 +88,11 @@ enum ProcessRunner {
                 }
             }
             if !process.isRunning {
+                // A shell/CLI may exit before its SSH or worker children. Finish stopping its group.
+                if let stoppedAt, let group, now - stoppedAt < 0.3, kill(-group, 0) == 0 {
+                    Thread.sleep(forTimeInterval: 0.01)
+                    continue
+                }
                 drain(outFD, &stdout, &outTruncated, &outDecoder)
                 drain(errFD, &stderr, &errTruncated, &errDecoder)
                 break
