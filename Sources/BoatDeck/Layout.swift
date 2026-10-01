@@ -23,16 +23,47 @@ extension CGFloat {
 /// Measures available width and publishes it to children.
 struct WidthReader<Content: View>: View {
     @ViewBuilder var content: (CGFloat) -> Content
-    @VState private var width: CGFloat = 1000
     var body: some View {
-        content(width)
-            .environment(\.contentWidth, width)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(GeometryReader { g in
-                Color.clear
-                    .onAppear { width = g.size.width }
-                    .onChange(of: g.size.width) { _, w in if abs(w - width) > 0.5 { width = w } }
-            })
+        GeometryReader { geometry in
+            content(geometry.size.width)
+                .environment(\.contentWidth, geometry.size.width)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+}
+
+/// The user owns pane widths. Content changes must never move these dividers.
+struct PaneDivider: View {
+    @Binding var width: Double
+    var limits: ClosedRange<Double>
+    var label: String
+    @VState private var startWidth: Double?
+
+    var body: some View {
+        Rectangle().fill(Color.clear)
+            .frame(width: 6)
+            .overlay(Rectangle().fill(BD.stroke).frame(width: 1))
+            .contentShape(Rectangle())
+            .onHover { inside in
+                if inside { NSCursor.resizeLeftRight.set() } else { NSCursor.arrow.set() }
+            }
+            .gesture(DragGesture(minimumDistance: 0)
+                .onChanged { drag in
+                    if startWidth == nil { startWidth = width }
+                    width = min(limits.upperBound, max(limits.lowerBound, (startWidth ?? width) + drag.translation.width))
+                }
+                .onEnded { _ in startWidth = nil })
+            .help("Drag to resize " + label.lowercased())
+            .accessibilityElement()
+            .accessibilityLabel(label + " width")
+            .accessibilityValue("\(Int(width)) points")
+            .accessibilityAdjustableAction { direction in
+                switch direction {
+                case .increment: width = min(limits.upperBound, width + 20)
+                case .decrement: width = max(limits.lowerBound, width - 20)
+                @unknown default: break
+                }
+            }
     }
 }
 

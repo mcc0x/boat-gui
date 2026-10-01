@@ -32,7 +32,7 @@ struct CommandPalette: View {
         })
         for s in NavSection.allCases {
             out.append(PaletteItem(title: "Go to \(s.rawValue)", subtitle: "⌘\(String(s.shortcut.character))", icon: s.icon, group: "Navigate") {
-                withAnimation(BD.spring) { state.section = s; if s == .sandboxes { state.selectedSandbox = nil } }
+                state.go(s); if s == .sandboxes { state.selectedSandbox = nil }
             })
         }
         for sb in state.sandboxes {
@@ -47,7 +47,7 @@ struct CommandPalette: View {
         }
         for e in state.environments {
             out.append(PaletteItem(title: e.displayName, subtitle: "Environment", icon: "leaf", group: "Environments") {
-                withAnimation(BD.spring) { state.section = .environments }
+                state.go(.environments)
             })
         }
         for n in state.namedSnapshots {
@@ -166,13 +166,12 @@ struct OnboardingView: View {
         ZStack {
             WaveField().opacity(0.8)
             VStack(spacing: 26) {
-                LogoMark(size: 76).appear()
+                LogoMark(size: 76)
                 VStack(spacing: 10) {
                     Text("Boat Deck").font(.system(size: 40, weight: .semibold)).foregroundStyle(BD.text)
                     Text("Your boat.dev fleet — sandboxes, agents, environments and snapshots — in one native Mac app.")
                         .font(.system(size: 15)).foregroundStyle(BD.text2).multilineTextAlignment(.center).frame(maxWidth: 460)
                 }
-                .appear(delay: 0.06)
 
                 VStack(alignment: .leading, spacing: 16) {
                     Eyebrow(text: "Connect with an API key")
@@ -200,7 +199,6 @@ struct OnboardingView: View {
                 }
                 .frame(width: 480)
                 .glassCard(radius: BD.r4, padding: 22)
-                .appear(delay: 0.12)
 
                 Link("Get an API key at boat.dev →", destination: URL(string: "https://docs.boat.dev/quickstart")!)
                     .font(.bdSmall).foregroundStyle(BD.text2)

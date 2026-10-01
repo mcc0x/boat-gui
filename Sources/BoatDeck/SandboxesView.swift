@@ -44,11 +44,11 @@ struct SandboxesView: View {
                 if let id = state.selectedSandbox {
                     Group {
                         if w >= 980 {
-                            HSplitView {
-                                compactList.frame(minWidth: 200, idealWidth: 240, maxWidth: 300)
+                            HStack(spacing: 0) {
+                                compactList.frame(width: min(300, max(200, prefs.sandboxListWidth)))
+                                PaneDivider(width: $prefs.sandboxListWidth, limits: 200...300, label: "Sandbox list")
                                 SandboxDetailView(sandboxId: id)
                                     .frame(minWidth: 450, maxWidth: .infinity)
-                                    .layoutPriority(1)
                                     .id(id)
                             }
                         } else {
@@ -60,7 +60,6 @@ struct SandboxesView: View {
                 }
             }
         }
-        .animation(BD.spring, value: state.selectedSandbox)
     }
 
     // MARK: Overview (grid / list)
@@ -74,7 +73,6 @@ struct SandboxesView: View {
                     Button { state.showNewSandbox = true } label: { Label("New sandbox", systemImage: "plus") }.bdButton(.primary)
                 }
             }
-            .appear()
 
             FlowLayout(spacing: 10, lineSpacing: 10) {
                 PillPicker(options: [
@@ -99,7 +97,6 @@ struct SandboxesView: View {
                     PillOption(value: "grid", label: "", icon: "square.grid.2x2"),
                 ], selection: $prefs.sandboxLayout)
             }
-            .appear(delay: 0.04)
 
             if !state.loadedOnce {
                 VStack(spacing: 0) { ForEach(0..<5, id: \.self) { _ in SkeletonRow() } }
@@ -113,7 +110,7 @@ struct SandboxesView: View {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 16)], spacing: 16) {
                     ForEach(Array(filtered.enumerated()), id: \.element.id) { i, s in
                         SandboxCard(s: s)
-                            .appear(delay: min(0.3, 0.025 * Double(i)))
+
                             .tapAction { state.open(sandbox: s.id) }
                             .contextMenu { SandboxQuickActions(id: s.id) }
                     }
@@ -129,7 +126,7 @@ struct SandboxesView: View {
     var compactList: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Button { withAnimation(BD.spring) { state.selectedSandbox = nil } } label: {
+                Button { state.selectedSandbox = nil } label: {
                     Label("All sandboxes", systemImage: "chevron.left")
                 }
                 .bdButton(.ghost, .small)
@@ -141,7 +138,7 @@ struct SandboxesView: View {
                 LazyVStack(spacing: 2) {
                     ForEach(filtered) { s in
                         CompactRow(s: s, selected: s.id == state.selectedSandbox)
-                            .tapAction { withAnimation(BD.spring) { state.selectedSandbox = s.id } }
+                            .tapAction { state.open(sandbox: s.id) }
                             .contextMenu { SandboxQuickActions(id: s.id) }
                     }
                 }
@@ -296,7 +293,7 @@ struct SandboxQuickActions: View {
         Button("Delete…", role: .destructive) {
             if confirm("Delete \(id)?", "This permanently deletes the sandbox and its snapshots.") {
                 Task { await state.run("Deleting sandbox") { try await $0.delete(id) } }
-                if state.selectedSandbox == id { withAnimation(BD.spring) { state.selectedSandbox = nil } }
+                if state.selectedSandbox == id { state.selectedSandbox = nil }
             }
         }
     }

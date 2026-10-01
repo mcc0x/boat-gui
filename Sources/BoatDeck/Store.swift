@@ -64,8 +64,9 @@ final class AppState: ObservableObject {
     static let shared = AppState()
 
     func go(_ s: NavSection) {
-        AppearIn.pageOpened()
-        withAnimation(BD.spring) {
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
             if s == .sandboxes && section == .sandboxes { selectedSandbox = nil }
             section = s
         }
@@ -97,10 +98,10 @@ final class AppState: ObservableObject {
 
     @Published private(set) var apiKey: String = ""
     @Published private(set) var sessionID = UUID()
-    @Published var section: NavSection = .home { didSet { if section != oldValue { AppearIn.pageOpened() } } }
+    @Published var section: NavSection = .home
     @Published var sandboxes: [Record] = []
     @Published var loadedOnce = false
-    @Published var selectedSandbox: String? { didSet { if selectedSandbox != oldValue { AppearIn.pageOpened() } } }
+    @Published var selectedSandbox: String?
     @Published var environments: [Record] = []
     @Published var namedSnapshots: [Record] = []
     @Published var me: JSON?
@@ -414,8 +415,9 @@ final class AppState: ObservableObject {
     }
 
     func open(sandbox id: String) {
-        AppearIn.pageOpened()
-        withAnimation(BD.spring) {
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
             section = .sandboxes
             selectedSandbox = id
         }

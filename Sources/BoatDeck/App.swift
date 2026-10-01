@@ -38,7 +38,7 @@ struct BoatDeckApp: App {
             CommandMenu("Go") {
                 Button("Command Palette…") { state.showPalette.toggle() }.keyboardShortcut("k")
                 Button("Refresh") { Task { await state.refreshAll() } }.keyboardShortcut("r")
-                Button("Toggle Sidebar") { withAnimation(BD.spring) { prefs.sidebarCollapsed.toggle() } }
+                Button("Toggle Sidebar") { prefs.sidebarCollapsed.toggle() }
                     .keyboardShortcut("\\")
                 Divider()
                 Button("Home") { state.go(.home) }.keyboardShortcut("1")

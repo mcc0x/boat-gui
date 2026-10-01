@@ -25,8 +25,8 @@ struct EnvironmentsView: View {
                         }
                         ForEach(Array(state.environments.enumerated()), id: \.element.id) { i, e in
                             EnvRow(env: e, selected: selected == e.id)
-                                .tapAction { withAnimation(BD.spring) { selected = e.id } }
-                                .appear(delay: 0.03 * Double(i))
+                                .tapAction { selected = e.id }
+
                         }
                     }
                 }
@@ -41,7 +41,6 @@ struct EnvironmentsView: View {
                 if let s = selected, let env = state.environments.first(where: { $0.id == s }) {
                     EnvironmentDetail(env: env, reload: reload, switcher: w < 860 ? AnyView(switcher) : nil)
                         .id(env.id)
-                        .transition(.opacity.combined(with: .offset(x: 12)))
                 } else {
                     EmptyStateView(icon: "leaf", title: "Select an environment",
                                    message: "Each sandbox boots with an environment: GitHub repos cloned, variables exported, secret files written.",
@@ -51,7 +50,6 @@ struct EnvironmentsView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         }
-        .animation(BD.spring, value: selected)
         .task {
             await reload()
             if selected == nil { selected = state.environments.first(where: { $0.json["isDefault"]?.bool == true })?.id ?? state.environments.first?.id }
@@ -61,7 +59,7 @@ struct EnvironmentsView: View {
     /// Compact environment picker shown in the page header when the list column is hidden.
     var switcher: some View {
         Menu {
-            ForEach(state.environments) { e in Button(e.displayName) { withAnimation(BD.spring) { selected = e.id } } }
+            ForEach(state.environments) { e in Button(e.displayName) { selected = e.id } }
             Divider()
             Button("New environment…") { create() }
         } label: { Label("Environments", systemImage: "leaf") }
@@ -145,13 +143,11 @@ struct EnvironmentDetail: View {
                     .background(BD.surface, in: Circle()).overlay(Circle().strokeBorder(BD.stroke, lineWidth: 1))
                 }
             }
-            .appear()
 
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 320), spacing: 40, alignment: .top)], alignment: .leading, spacing: 28) {
                 accessSection
                 reposSection
             }
-            .appear(delay: 0.05)
 
             Hairline()
 
@@ -182,7 +178,6 @@ struct EnvironmentDetail: View {
                     .padding(.top, 10)
                 }
             }
-            .appear(delay: 0.1)
 
             Hairline()
 
@@ -204,7 +199,6 @@ struct EnvironmentDetail: View {
                     Button { addSecretFile() } label: { Label("Add secret file from Mac…", systemImage: "plus") }.bdButton(.secondary, .small)
                 }
             }
-            .appear(delay: 0.14)
 
             Hairline()
 

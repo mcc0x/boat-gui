@@ -14,21 +14,20 @@ struct AccountView: View {
                     IconButton(icon: "arrow.clockwise", help: "Refresh") { Task { await load() } }
                 }
             }
-            .appear()
 
             AdaptiveStack(breakpoint: 820, spacing: 40) {
-                profileCard.appear(delay: 0.03)
-                balanceCard.appear(delay: 0.06)
+                profileCard
+                balanceCard
             }
 
             Hairline()
 
             if let starts = state.limits?["starts"]?.object, !starts.isEmpty {
-                limitsCard(starts).appear(delay: 0.09)
+                limitsCard(starts)
                 Hairline()
             }
 
-            orgsCard.appear(delay: 0.12)
+            orgsCard
 
             Hairline()
 
@@ -46,8 +45,7 @@ struct AccountView: View {
                 .toggleStyle(.switch)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            
-            .appear(delay: 0.15)
+
         }
         .task { await load() }
     }
@@ -72,7 +70,7 @@ struct AccountView: View {
             } label: { Text("All fields").font(.bdSmall).foregroundStyle(BD.text3) }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        
+
     }
 
     var balanceCard: some View {
@@ -117,7 +115,7 @@ struct AccountView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        
+
     }
 
     func limitsCard(_ starts: [String: JSON]) -> some View {
@@ -152,7 +150,7 @@ struct AccountView: View {
                 Text("No limit on longer windows.").font(.bdSmall).foregroundStyle(BD.text3)
             }
         }
-        
+
     }
 
     var orgsCard: some View {
@@ -185,7 +183,7 @@ struct AccountView: View {
                 .padding(.vertical, 4)
             }
         }
-        
+
     }
 
     func newOrg() {
@@ -248,7 +246,6 @@ struct CLIConsoleView: View {
                     }
                 }
             }
-            .appear()
 
             VStack(spacing: 0) {
                 LogView(text: output.isEmpty ? "# Output of boat commands appears here.\n# Interactive commands (ssh, login) open in Terminal." : output)
@@ -273,7 +270,7 @@ struct CLIConsoleView: View {
             }
             .background(BD.bgRaised, in: RoundedRectangle(cornerRadius: BD.r2, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: BD.r2, style: .continuous).strokeBorder(BD.stroke, lineWidth: 1))
-            .appear(delay: 0.05)
+
         }
         .onDisappear { task?.cancel(); stopper?() }
     }

@@ -34,7 +34,7 @@ struct SettingsView: View {
                 }
                 .padding(.leading, 8).padding(.top, 40).padding(.bottom, 14)
                 ForEach(SettingsPane.allCases) { p in
-                    Button { withAnimation(BD.snappy) { pane = p } } label: {
+                    Button { pane = p } label: {
                         HStack(spacing: 9) {
                             Image(systemName: p.icon).font(.system(size: 12.5)).frame(width: 18)
                             Text(p.rawValue).font(.system(size: 12.5, weight: pane == p ? .semibold : .regular))
@@ -45,7 +45,6 @@ struct SettingsView: View {
                         .background {
                             if pane == p {
                                 RoundedRectangle(cornerRadius: 8, style: .continuous).fill(BD.surfaceHi)
-                                    .matchedGeometryEffect(id: "pane", in: ns)
                             }
                         }
                         .contentShape(Rectangle())
@@ -76,7 +75,6 @@ struct SettingsView: View {
                         }
                     }
                     .id(pane)
-                    .transition(.opacity.combined(with: .offset(y: 6)))
                 }
                 .padding(.horizontal, 28).padding(.top, 40).padding(.bottom, 28)
                 .frame(maxWidth: .infinity, alignment: .leading)

@@ -14,7 +14,7 @@ struct HomeView: View {
 
     var body: some View {
         Page {
-            HomeHeader(greeting: greeting).appear()
+            HomeHeader(greeting: greeting)
 
             MetricStrip(metrics: [
                 Metric(title: "Active", value: "\(state.runningCount)",
@@ -26,7 +26,6 @@ struct HomeView: View {
                 Metric(title: "Environments", value: "\(state.environments.count)",
                        sub: "\(state.namedSnapshots.count) named snapshots", icon: "leaf"),
             ])
-            .appear(delay: 0.04)
 
             Hairline()
 
@@ -38,7 +37,7 @@ struct HomeView: View {
                     ActivitySection()
                 }
             }
-            .appear(delay: 0.08)
+
         }
     }
 

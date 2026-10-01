@@ -109,6 +109,8 @@ final class UIPrefs: ObservableObject {
     @AppStorage("ui.ambient") var ambient: Bool = true
     @AppStorage("ui.motion") var motion: Bool = true
     @AppStorage("ui.density") var density: Density = .comfortable
+    @AppStorage("ui.sidebarWidth") var sidebarWidth: Double = 220
+    @AppStorage("ui.sandboxListWidth") var sandboxListWidth: Double = 240
     @AppStorage("ui.sidebarCollapsed") var sidebarCollapsed: Bool = false
     @AppStorage("ui.sandboxLayout") var sandboxLayout: String = "list"
     @AppStorage("ui.menuBar") var showMenuBar: Bool = true
@@ -180,7 +182,6 @@ extension View {
         if #available(macOS 26.0, *) { GlassEffectContainer(spacing: spacing) { self } } else { self }
     }
     func hoverLift(_ amount: CGFloat = 1.015) -> some View { modifier(HoverLift(amount: amount)) }
-    func appear(delay: Double = 0) -> some View { modifier(AppearIn(delay: delay)) }
 }
 
 struct HoverLift: ViewModifier {
@@ -193,28 +194,6 @@ struct HoverLift: ViewModifier {
             .shadow(color: .black.opacity(hover ? 0.28 : 0), radius: hover ? 18 : 0, y: hover ? 8 : 0)
             .animation(BD.snappy, value: hover)
             .onHover { hover = $0 }
-    }
-}
-
-struct AppearIn: ViewModifier {
-    /// Entrance animations only play within this window after navigation, so a view that gets rebuilt later
-    /// (resize, data refresh) never blinks out and back in.
-    static var allowUntil = Date().addingTimeInterval(1.5)
-    static func pageOpened() { allowUntil = Date().addingTimeInterval(0.8) }
-
-    @EnvironmentObject var prefs: UIPrefs
-    var delay: Double
-    @VState private var shown = Date() > AppearIn.allowUntil
-    func body(content: Content) -> some View {
-        content
-            .opacity(shown ? 1 : 0)
-            .offset(y: shown || !prefs.motion ? 0 : 8)
-            .onAppear {
-                guard !shown else { return }
-                if prefs.motion && Date() <= AppearIn.allowUntil {
-                    withAnimation(BD.spring.delay(delay)) { shown = true }
-                } else { shown = true }
-            }
     }
 }
 

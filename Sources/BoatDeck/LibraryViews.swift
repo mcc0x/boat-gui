@@ -16,7 +16,7 @@ struct SnapshotsView: View {
             PageHeader(title: "Snapshots", subtitle: "Frozen disk images. Named snapshots seed new sandboxes with `--from`.") {
                 IconButton(icon: "arrow.clockwise", help: "Refresh") { Task { await reload() } }
             }
-            .appear()
+
             HStack {
                 PillPicker(options: [PillOption(value: "named", label: "Named", icon: "tag"),
                                      PillOption(value: "all", label: "All snapshots", icon: "square.stack.3d.up")], selection: $scope)
@@ -36,7 +36,7 @@ struct SnapshotsView: View {
                 } else {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 14)], spacing: 14) {
                         ForEach(Array(items.enumerated()), id: \.element.id) { i, s in
-                            NamedSnapshotCard(s: s, reload: reload).appear(delay: 0.03 * Double(i))
+                            NamedSnapshotCard(s: s, reload: reload)
                         }
                     }
                 }
@@ -176,7 +176,6 @@ struct WebhooksView: View {
             PageHeader(title: "Webhooks", subtitle: "Get a signed POST when sandboxes change state.") {
                 IconButton(icon: "arrow.clockwise", help: "Refresh") { Task { await reload() } }
             }
-            .appear()
 
             VStack(alignment: .leading, spacing: 12) {
                 Eyebrow(text: "New endpoint")
@@ -204,7 +203,6 @@ struct WebhooksView: View {
                     }
                 }
             }
-            .appear(delay: 0.04)
 
             Hairline()
 
@@ -219,7 +217,7 @@ struct WebhooksView: View {
                 VStack(spacing: 0) {
                     ForEach(hooks) { h in WebhookRow(h: h, reload: reload); Hairline() }
                 }
-                .appear(delay: 0.08)
+
             }
         }
         .task { await reload() }
@@ -302,7 +300,6 @@ struct APIKeysView: View {
             PageHeader(title: "API Keys", subtitle: "Scoped keys for scripts, CI and teammates. Secrets are shown once.") {
                 IconButton(icon: "arrow.clockwise", help: "Refresh") { Task { await reload() } }
             }
-            .appear()
 
             VStack(alignment: .leading, spacing: 14) {
                 Eyebrow(text: "Create key")
@@ -335,7 +332,6 @@ struct APIKeysView: View {
                         .font(.bdSmall).foregroundStyle(BD.text3)
                 }
             }
-            .appear(delay: 0.04)
 
             if let error { Text(error).font(.bdSmall).foregroundStyle(BD.text3) }
             AdaptiveStack {

@@ -12,11 +12,15 @@ struct RootView: View {
                     .transition(.opacity.combined(with: .scale(scale: 0.98)))
             } else {
                 GeometryReader { geo in
-                    HSplitView {
+                    HStack(spacing: 0) {
                         Sidebar()
+                            .frame(width: prefs.sidebarCollapsed ? 64 : min(280, max(220, prefs.sidebarWidth)))
+                        if !prefs.sidebarCollapsed {
+                            PaneDivider(width: $prefs.sidebarWidth, limits: 220...280, label: "Sidebar")
+                        }
                         content
                             .frame(minWidth: 440, maxWidth: .infinity, maxHeight: .infinity)
-                            .layoutPriority(1)
+
                     }
                     .environment(\.sidebarCollapsed, prefs.sidebarCollapsed)
                     .onChange(of: geo.size.width < 900) { _, narrow in
@@ -74,7 +78,6 @@ struct RootView: View {
 struct Sidebar: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var prefs: UIPrefs
-    @VNamespace private var ns
     @Environment(\.openSettings) private var openSettings
 
     @Environment(\.sidebarCollapsed) var collapsed
@@ -164,7 +167,7 @@ struct Sidebar: View {
                     .frame(maxWidth: .infinity).padding(.bottom, 16)
             }
         }
-        .frame(minWidth: collapsed ? 64 : 220, idealWidth: collapsed ? 64 : 220, maxWidth: collapsed ? 64 : 280)
+        .frame(maxWidth: .infinity)
         .frame(maxHeight: .infinity)
         .background {
             if prefs.glass && !reduceTransparency {
@@ -185,14 +188,13 @@ struct Sidebar: View {
     func group(_ title: String, _ items: [NavSection]) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             if !collapsed { Eyebrow(text: title).padding(.leading, 10).padding(.bottom, 4) }
-            ForEach(items) { s in SidebarItem(section: s, ns: ns) }
+            ForEach(items) { s in SidebarItem(section: s) }
         }
     }
 }
 
 struct SidebarItem: View {
     let section: NavSection
-    let ns: Namespace.ID
     @EnvironmentObject var state: AppState
     @EnvironmentObject var prefs: UIPrefs
     @Environment(\.sidebarCollapsed) var collapsed
@@ -211,10 +213,7 @@ struct SidebarItem: View {
 
     var body: some View {
         Button {
-            withAnimation(BD.spring) {
-                if state.section == section && section == .sandboxes { state.selectedSandbox = nil }
-                state.section = section
-            }
+            state.go(section)
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: selected ? section.filledIcon : section.icon)
@@ -243,7 +242,6 @@ struct SidebarItem: View {
                     RoundedRectangle(cornerRadius: 9, style: .continuous)
                         .fill(BD.surfaceHi)
                         .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(BD.stroke, lineWidth: 1))
-                        .matchedGeometryEffect(id: "sel", in: ns)
                 } else if hover {
                     RoundedRectangle(cornerRadius: 9, style: .continuous).fill(BD.surface)
                 }
@@ -278,7 +276,7 @@ struct CreditCard: View {
         }
         .padding(10)
         .background(BD.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .tapAction { withAnimation(BD.spring) { state.section = .account } }
+        .tapAction { state.go(.account) }
     }
 }
 

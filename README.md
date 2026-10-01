@@ -30,7 +30,7 @@
 | **Console** | Run any `boat` CLI command. Interactive ones (`ssh`, `login`) open in Terminal. |
 | **Everywhere** | ⌘K command palette, a menu bar extra with quick actions, state-change notifications, light/dark/system themes, accent colours, and an optional glass/ambient look. |
 
-The layout adapts to the window: resize the sidebar and sandbox list by dragging their dividers, or collapse navigation using the top toolbar button. Narrow windows collapse navigation to icons; columns reflow and toolbars wrap, so content fits from about 720 pt wide up to full screen. Settings stays available when navigation is collapsed.
+The layout adapts to the window: resize the sidebar and sandbox list by dragging their dividers, or collapse navigation using the top toolbar button. Narrow windows collapse navigation to icons; columns reflow and toolbars wrap, so content fits from about 720 pt wide up to full screen. Settings stays available when navigation is collapsed. Pane widths are remembered across navigation; switching pages does not animate or resize the sidebar.
 
 ## Requirements
 

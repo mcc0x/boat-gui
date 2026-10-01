@@ -47,18 +47,16 @@ struct SandboxDetailView: View {
                 }
                 .environment(\.detailGutter, gutter)
                 .id(tab)
-                .transition(.opacity)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .animation(BD.snappy, value: tab)
         .task { detail = try? await state.api.sandbox(sandboxId) }
     }
 
     func header(_ w: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             if showBack {
-                Button { withAnimation(BD.spring) { state.selectedSandbox = nil } } label: { Label("Sandboxes", systemImage: "chevron.left") }
+                Button { state.selectedSandbox = nil } label: { Label("Sandboxes", systemImage: "chevron.left") }
                     .bdButton(.ghost, .small)
             }
             ViewThatFits(in: .horizontal) {
@@ -117,7 +115,7 @@ struct UnderlineTabs: View {
         HStack(spacing: iconsOnly ? 6 : 20) {
             ForEach(tabs) { t in
                 let on = t == selection
-                Button { withAnimation(BD.snappy) { selection = t } } label: {
+                Button { selection = t } label: {
                     VStack(spacing: 8) {
                         HStack(spacing: 6) {
                             Image(systemName: t.icon).font(.system(size: 12))
@@ -223,9 +221,9 @@ struct OverviewTab: View {
                     .background(BD.amber.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
                 }
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 250), spacing: 28, alignment: .top)], alignment: .leading, spacing: 22) {
-                    lifetimeCard.appear()
-                    usageCard.appear(delay: 0.04)
-                    machineCard.appear(delay: 0.08)
+                    lifetimeCard
+                    usageCard
+                    machineCard
                 }
 
                 Hairline()
@@ -256,7 +254,6 @@ struct OverviewTab: View {
                         Button { Task { await downloadArtifacts() } } label: { Label("Artifacts", systemImage: "arrow.down.doc") }.bdButton()
                     }
                 }
-                .appear(delay: 0.1)
 
                 Hairline()
 
@@ -495,7 +492,7 @@ struct AccessTab: View {
             c()
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        .appear()
+
     }
 
     func loadLocalKey() {
@@ -588,7 +585,7 @@ struct SandboxSnapshotsTab: View {
                             }
                             .padding(.bottom, 18)
                         }
-                        .appear(delay: 0.03 * Double(i))
+
                     }
                 }
             }

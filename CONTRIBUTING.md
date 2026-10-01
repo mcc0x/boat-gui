@@ -7,6 +7,8 @@ There is no release, App Store, or notarization workflow to maintain.
 1. Install Command Line Tools 26+ or select Xcode 26+. See the README for build requirements.
 2. Run `make test` and `make build`. Neither command installs or launches the app.
 3. For UI changes, check the affected screen at narrow and wide window sizes.
+   Resize the sidebar and sandbox list, switch sections, and return: pane widths
+   should stay where you put them, without page-entry motion.
 4. Open a pull request explaining what changed and how you checked it.
 
 Regression checks compile with plain Swift and use synthetic data, temporary
