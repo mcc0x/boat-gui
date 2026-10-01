@@ -227,8 +227,15 @@ struct CLIConsoleView: View {
 
     var body: some View {
         Page {
-            PageHeader(title: "Console", subtitle: state.cliPath.map { "Running \($0)" } ?? "The boat CLI isn't installed yet.") {
+            PageHeader(title: "Console", subtitle: state.cliPath != nil ? "Run commands using your Boat CLI login." : "The boat CLI isn't installed yet.") {
                 HStack {
+                    Menu {
+                        ForEach(presets, id: \.self) { preset in
+                            Button("boat \(preset)") { args = preset }
+                        }
+                    } label: { Label("Commands", systemImage: "terminal") }
+                    .menuStyle(.borderlessButton).fixedSize().tint(BD.text2)
+                    .help("Choose a command, then press Run")
                     Button { state.openCLI(args.isEmpty ? ["status"] : split(args)) } label: {
                         Label("Open in Terminal", systemImage: "arrow.up.forward.app")
                     }
@@ -243,31 +250,29 @@ struct CLIConsoleView: View {
             }
             .appear()
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    ForEach(presets, id: \.self) { p in
-                        Button("boat \(p)") { args = p; run() }.bdButton(.secondary, .small).font(.bdMonoSmall)
-                    }
-                }
-            }
-
             VStack(spacing: 0) {
-                LogView(text: output.isEmpty ? "# Output of boat commands appears here.\n# Interactive commands (ssh, login) open in Terminal." : output, onDark: true)
+                LogView(text: output.isEmpty ? "# Output of boat commands appears here.\n# Interactive commands (ssh, login) open in Terminal." : output)
                     .frame(minHeight: 380)
-                Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1)
+                Hairline()
                 HStack(spacing: 8) {
                     Text("boat").font(.system(size: 13, weight: .semibold, design: .monospaced)).foregroundColor(BD.green)
-                    TextField("", text: $args, prompt: Text("list --json").foregroundColor(.white.opacity(0.25)))
-                        .textFieldStyle(.plain).font(.system(size: 13, design: .monospaced)).foregroundColor(.white)
+                    TextField("", text: $args, prompt: Text("Enter a command…").foregroundColor(BD.text3))
+                        .textFieldStyle(.plain).font(.system(size: 13, design: .monospaced)).foregroundColor(BD.text)
                         .onSubmit { run() }
-                    if running { Spinner(size: 12, color: .white.opacity(0.6)); Button("Stop") { task?.cancel(); stopper?() }.bdButton(.danger, .small) }
                     Button("Clear") { output = "" }.bdButton(.ghost, .small)
+                    if running {
+                        Spinner(size: 12)
+                        Button("Stop") { task?.cancel(); stopper?() }.bdButton(.danger, .small)
+                    } else {
+                        Button { run() } label: { Label("Run", systemImage: "return") }
+                            .bdButton(.primary, .small)
+                            .disabled(args.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || state.cliPath == nil)
+                    }
                 }
                 .padding(12)
             }
-            .background(Color(red: 0.03, green: 0.03, blue: 0.035), in: RoundedRectangle(cornerRadius: BD.r3, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: BD.r3, style: .continuous).strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
-            .environment(\.colorScheme, .dark)
+            .background(BD.bgRaised, in: RoundedRectangle(cornerRadius: BD.r2, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: BD.r2, style: .continuous).strokeBorder(BD.stroke, lineWidth: 1))
             .appear(delay: 0.05)
         }
         .onDisappear { task?.cancel(); stopper?() }
