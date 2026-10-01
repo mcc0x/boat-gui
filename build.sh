@@ -27,14 +27,17 @@ BIN="$(swift build -c release --show-bin-path)/BoatDeck"
 [[ -x "$BIN" ]] || { echo "Build did not produce BoatDeck." >&2; exit 1; }
 
 mkdir -p build
-STAGE=$(mktemp -d "$PWD/build/.stage.XXXXXX")
+STAGE=$(mktemp -d "${TMPDIR:-/tmp}/boatdeck.XXXXXX")
 INSTALL_STAGE=""
 BACKUP=""
 DEST="$HOME/Applications/Boat Deck.app"
 cleanup() {
   local result=$?
   if [[ -n "$BACKUP" && -d "$BACKUP" && ! -e "$DEST" ]]; then
-    mv "$BACKUP" "$DEST" || true
+    if ! mv "$BACKUP" "$DEST"; then
+      echo "Could not restore the previous app; it remains at $BACKUP" >&2
+      INSTALL_STAGE="" # Preserve the backup for manual recovery.
+    fi
   fi
   rm -rf "$STAGE"
   [[ -z "$INSTALL_STAGE" ]] || rm -rf "$INSTALL_STAGE"
@@ -59,17 +62,28 @@ done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 
 echo "▸ Signing (ad-hoc)…"
+# Generated resources can inherit Finder metadata; clear it only inside the staged app.
+xattr -cr "$APP"
 codesign --force --sign - "$APP"
 codesign --verify --strict "$APP"
+# File Provider folders (including iCloud Documents) can add FinderInfo to .app
+# directories after signing. Keep the actual bundle in a local cache and expose
+# it through the familiar build path, so both synced and ordinary clones work.
+REPO_ID=$(print -rn -- "$PWD" | shasum -a 256 | cut -c 1-16)
+BUNDLE_DIR="$HOME/Library/Caches/BoatDeck/Builds/$REPO_ID"
+mkdir -p "$BUNDLE_DIR"
+rm -rf "$BUNDLE_DIR/Boat Deck.app"
+mv "$APP" "$BUNDLE_DIR/Boat Deck.app"
 rm -rf "build/Boat Deck.app"
-mv "$APP" "build/Boat Deck.app"
+ln -s "$BUNDLE_DIR/Boat Deck.app" "build/Boat Deck.app"
+codesign --verify --strict "build/Boat Deck.app"
 echo "✓ Built build/Boat Deck.app"
 [[ "$MODE" != --build-only ]] || exit 0
 
 # Prepare the replacement before touching the installed app.
 mkdir -p "$HOME/Applications"
 INSTALL_STAGE=$(mktemp -d "$HOME/Applications/.boatdeck-install.XXXXXX")
-ditto --norsrc --noextattr "build/Boat Deck.app" "$INSTALL_STAGE/Boat Deck.app"
+ditto --norsrc --noextattr "$BUNDLE_DIR/Boat Deck.app" "$INSTALL_STAGE/Boat Deck.app"
 codesign --verify --strict "$INSTALL_STAGE/Boat Deck.app"
 if pgrep -x BoatDeck >/dev/null; then
   osascript -e 'tell application id "dev.boat.BoatDeck" to quit'
