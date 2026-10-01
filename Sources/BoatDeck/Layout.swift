@@ -30,8 +30,8 @@ struct WidthReader<Content: View>: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(GeometryReader { g in
                 Color.clear
-                    .onAppear { width = g.size.width; UILog.note("WidthReader appear \(Int(g.size.width))") }
-                    .onChange(of: g.size.width) { _, w in if abs(w - width) > 0.5 { UILog.note("width \(Int(width))→\(Int(w))"); width = w } }
+                    .onAppear { width = g.size.width }
+                    .onChange(of: g.size.width) { _, w in if abs(w - width) > 0.5 { width = w } }
             })
     }
 }

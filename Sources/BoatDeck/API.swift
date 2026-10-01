@@ -321,16 +321,3 @@ enum Trace {
         else { try? line.write(to: f, atomically: true, encoding: .utf8) }
     }
 }
-
-/// Tiny UI diagnostics log (~/Library/Logs/BoatDeck/ui.log), used to chase redraw issues.
-enum UILog {
-    static let url = Trace.dir.appendingPathComponent("ui.log")
-    static let q = DispatchQueue(label: "uilog")
-    static func note(_ s: String) {
-        let line = "\(Date().timeIntervalSince1970) \(s)\n"
-        q.async {
-            if let h = try? FileHandle(forWritingTo: url) { h.seekToEndOfFile(); h.write(Data(line.utf8)); try? h.close() }
-            else { try? line.write(to: url, atomically: true, encoding: .utf8) }
-        }
-    }
-}

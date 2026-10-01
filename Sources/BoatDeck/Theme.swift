@@ -209,7 +209,6 @@ struct AppearIn: ViewModifier {
             .opacity(shown ? 1 : 0)
             .offset(y: shown || !prefs.motion ? 0 : 8)
             .onAppear {
-                if !shown { UILog.note("AppearIn fade") }
                 guard !shown else { return }
                 if prefs.motion && Date() <= AppearIn.allowUntil {
                     withAnimation(BD.spring.delay(delay)) { shown = true }

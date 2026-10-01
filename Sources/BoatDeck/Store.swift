@@ -214,7 +214,7 @@ final class AppState: ObservableObject {
         do {
             let list = try await api.sandboxes()
             detectChanges(list)
-            if list != sandboxes { UILog.note("sandboxes changed"); withAnimation(BD.spring) { sandboxes = list } }
+            if list != sandboxes { withAnimation(BD.spring) { sandboxes = list } }
             if !loadedOnce { loadedOnce = true }
             if connection != .ok { connection = .ok }
             if !silent, lastError != nil { lastError = nil }

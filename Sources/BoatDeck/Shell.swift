@@ -33,7 +33,6 @@ struct RootView: View {
         .animation(BD.spring, value: state.hasKey)
         .animation(BD.snappy, value: state.showPalette)
         .task { await state.refreshAll() }
-        .onAppear { UILog.note("RootView appear") }
         .sheet(isPresented: $state.showNewSandbox) {
             NewSandboxSheet().environmentObject(state).environmentObject(prefs)
         }
