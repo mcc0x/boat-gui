@@ -63,6 +63,7 @@ final class AppState: ObservableObject {
     static let shared = AppState()
 
     func go(_ s: NavSection) {
+        AppearIn.pageOpened()
         withAnimation(BD.spring) {
             if s == .sandboxes && section == .sandboxes { selectedSandbox = nil }
             section = s
@@ -94,10 +95,10 @@ final class AppState: ObservableObject {
     @AppStorage("agent.expandTools") var expandTools: Bool = false
 
     @Published var apiKey: String = "" { didSet { if oldValue != apiKey { Credentials.save(apiKey) }; rebuildAPI() } }
-    @Published var section: NavSection = .home
+    @Published var section: NavSection = .home { didSet { if section != oldValue { AppearIn.pageOpened() } } }
     @Published var sandboxes: [Record] = []
     @Published var loadedOnce = false
-    @Published var selectedSandbox: String?
+    @Published var selectedSandbox: String? { didSet { if selectedSandbox != oldValue { AppearIn.pageOpened() } } }
     @Published var environments: [Record] = []
     @Published var namedSnapshots: [Record] = []
     @Published var me: JSON?
@@ -190,17 +191,17 @@ final class AppState: ObservableObject {
     func refreshAll() async {
         guard hasKey else { return }
         Task { await probeIfTracing() }
-        loading = true
-        defer { loading = false }
+        if !loading { loading = true }
+        defer { if loading { loading = false } }
         await refreshSandboxes(silent: false)
         async let e = try? api.environments()
         async let n = try? api.namedSnapshots()
         async let m = try? api.me()
         async let l = try? api.limits()
-        environments = await e ?? environments
-        namedSnapshots = await n ?? namedSnapshots
-        me = await m ?? me
-        limits = await l ?? limits
+        if let ne = await e, ne != environments { environments = ne }
+        if let nn = await n, nn != namedSnapshots { namedSnapshots = nn }
+        if let nm = await m, nm != me { me = nm }
+        if let nl = await l, nl != limits { limits = nl }
         if catalog.isEmpty { await loadCatalog() }
     }
 
@@ -213,13 +214,13 @@ final class AppState: ObservableObject {
         do {
             let list = try await api.sandboxes()
             detectChanges(list)
-            withAnimation(BD.spring) { sandboxes = list }
-            loadedOnce = true
-            connection = .ok
-            if !silent { lastError = nil }
+            if list != sandboxes { UILog.note("sandboxes changed"); withAnimation(BD.spring) { sandboxes = list } }
+            if !loadedOnce { loadedOnce = true }
+            if connection != .ok { connection = .ok }
+            if !silent, lastError != nil { lastError = nil }
         } catch {
-            loadedOnce = true
-            if !silent { lastError = error.localizedDescription }
+            if !loadedOnce { loadedOnce = true }
+            if !silent, lastError != error.localizedDescription { lastError = error.localizedDescription }
             if let e = error as? BoatError, e.status == 401 || e.status == 403 { connection = .failed(e.message) }
         }
     }
@@ -323,6 +324,7 @@ final class AppState: ObservableObject {
     }
 
     func open(sandbox id: String) {
+        AppearIn.pageOpened()
         withAnimation(BD.spring) {
             section = .sandboxes
             selectedSandbox = id

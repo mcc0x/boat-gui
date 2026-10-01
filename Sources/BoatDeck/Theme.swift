@@ -196,15 +196,24 @@ struct HoverLift: ViewModifier {
 }
 
 struct AppearIn: ViewModifier {
+    /// Entrance animations only play within this window after navigation, so a view that gets rebuilt later
+    /// (resize, data refresh) never blinks out and back in.
+    static var allowUntil = Date().addingTimeInterval(1.5)
+    static func pageOpened() { allowUntil = Date().addingTimeInterval(0.8) }
+
     @EnvironmentObject var prefs: UIPrefs
     var delay: Double
-    @VState private var shown = false
+    @VState private var shown = Date() > AppearIn.allowUntil
     func body(content: Content) -> some View {
         content
             .opacity(shown ? 1 : 0)
-            .offset(y: shown || !prefs.motion ? 0 : 10)
+            .offset(y: shown || !prefs.motion ? 0 : 8)
             .onAppear {
-                if prefs.motion { withAnimation(BD.spring.delay(delay)) { shown = true } } else { shown = true }
+                if !shown { UILog.note("AppearIn fade") }
+                guard !shown else { return }
+                if prefs.motion && Date() <= AppearIn.allowUntil {
+                    withAnimation(BD.spring.delay(delay)) { shown = true }
+                } else { shown = true }
             }
     }
 }

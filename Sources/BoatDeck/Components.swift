@@ -104,24 +104,23 @@ struct StatusDot: View {
     let state: String
     var size: CGFloat = 8
     @EnvironmentObject var prefs: UIPrefs
-    @VState private var pulse = false
-    var live: Bool { ["running", "provisioning", "hydrating", "resuming", "archiving", "stopping", "ready"].contains(state) }
+    @Environment(\.controlActiveState) private var active
+    var live: Bool { ["running", "provisioning", "hydrating", "resuming", "archiving", "stopping", "ready", "idle"].contains(state) }
     var body: some View {
         ZStack {
             if live && prefs.motion {
-                Circle().fill(colorForState(state).opacity(0.4))
-                    .frame(width: size, height: size)
-                    .scaleEffect(pulse ? 2.3 : 1)
-                    .opacity(pulse ? 0 : 0.9)
+                TimelineView(.animation(minimumInterval: 1 / 24, paused: active == .inactive)) { tl in
+                    let p = tl.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.8) / 1.8
+                    Circle().fill(colorForState(state).opacity(0.4))
+                        .frame(width: size, height: size)
+                        .scaleEffect(1 + 1.3 * p)
+                        .opacity(0.9 * (1 - p))
+                }
             }
             Circle().fill(colorForState(state)).frame(width: size, height: size)
                 .shadow(color: colorForState(state).opacity(0.7), radius: live ? 3 : 0)
         }
         .frame(width: size * 2.3, height: size * 2.3)
-        .onAppear {
-            guard live else { return }
-            withAnimation(.easeOut(duration: 1.6).repeatForever(autoreverses: false)) { pulse = true }
-        }
     }
 }
 
@@ -237,18 +236,19 @@ struct StatTile: View {
 // MARK: - Loading
 
 struct Shimmer: ViewModifier {
-    @VState private var phase: CGFloat = -1
     func body(content: Content) -> some View {
         content
             .overlay(
-                GeometryReader { geo in
-                    LinearGradient(colors: [.clear, BD.text.opacity(0.07), .clear], startPoint: .leading, endPoint: .trailing)
-                        .frame(width: geo.size.width * 0.5)
-                        .offset(x: phase * geo.size.width * 1.5)
+                TimelineView(.animation(minimumInterval: 1 / 30)) { tl in
+                    let phase = tl.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.3) / 1.3 * 2 - 1
+                    GeometryReader { geo in
+                        LinearGradient(colors: [.clear, BD.text.opacity(0.07), .clear], startPoint: .leading, endPoint: .trailing)
+                            .frame(width: geo.size.width * 0.5)
+                            .offset(x: phase * geo.size.width * 1.5)
+                    }
                 }
                 .mask(content)
             )
-            .onAppear { withAnimation(.linear(duration: 1.3).repeatForever(autoreverses: false)) { phase = 1 } }
     }
 }
 
@@ -270,14 +270,14 @@ struct SkeletonRow: View {
 struct Spinner: View {
     var size: CGFloat = 14
     var color: Color = BD.text2
-    @VState private var spin = false
     var body: some View {
-        Circle()
-            .trim(from: 0.15, to: 0.85)
-            .stroke(color, style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
-            .frame(width: size, height: size)
-            .rotationEffect(.degrees(spin ? 360 : 0))
-            .onAppear { withAnimation(.linear(duration: 0.8).repeatForever(autoreverses: false)) { spin = true } }
+        TimelineView(.animation) { tl in
+            Circle()
+                .trim(from: 0.15, to: 0.85)
+                .stroke(color, style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
+                .frame(width: size, height: size)
+                .rotationEffect(.degrees(tl.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 0.8) / 0.8 * 360))
+        }
     }
 }
 
@@ -290,15 +290,17 @@ struct EmptyStateView: View {
     var actionTitle: String? = nil
     var action: (() -> Void)? = nil
     @EnvironmentObject var prefs: UIPrefs
-    @VState private var float = false
+    @Environment(\.controlActiveState) private var active
     var body: some View {
         VStack(spacing: 14) {
             ZStack {
                 Circle().strokeBorder(BD.stroke.opacity(0.6), lineWidth: 1).frame(width: 124, height: 124)
                 Circle().fill(BD.surface).frame(width: 84, height: 84)
                 Circle().strokeBorder(BD.stroke, lineWidth: 1).frame(width: 84, height: 84)
-                Image(systemName: icon).font(.system(size: 30, weight: .light)).foregroundStyle(BD.text2)
-                    .offset(y: float ? -3 : 3)
+                TimelineView(.animation(minimumInterval: 1 / 30, paused: !prefs.motion || active == .inactive)) { tl in
+                    Image(systemName: icon).font(.system(size: 30, weight: .light)).foregroundStyle(BD.text2)
+                        .offset(y: 3 * sin(tl.date.timeIntervalSinceReferenceDate * 2 * .pi / 4.4))
+                }
             }
             Text(title).font(.bdH2).foregroundStyle(BD.text)
             if !message.isEmpty {
@@ -308,7 +310,6 @@ struct EmptyStateView: View {
         }
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onAppear { if prefs.motion { withAnimation(.easeInOut(duration: 2.2).repeatForever()) { float = true } } }
     }
 }
 
