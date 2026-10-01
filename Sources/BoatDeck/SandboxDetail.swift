@@ -265,6 +265,7 @@ struct OverviewTab: View {
     }
 
     var remainingText: String {
+        if ["archived", "stopped", "paused", "archiving"].contains(detail?["state"]?.string ?? "") { return "Stopped" }
         if neverStops { return "Never" }
         guard let r = remaining else { return "—" }
         if r <= 0 { return "Stopping" }

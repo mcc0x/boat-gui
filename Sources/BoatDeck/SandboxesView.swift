@@ -50,12 +50,11 @@ struct SandboxesView: View {
                         }
                         SandboxDetailView(sandboxId: id, showBack: w < 980)
                             .id(id)
-                            .transition(.asymmetric(insertion: .opacity.combined(with: .offset(x: 16)), removal: .identity))
+                            .transition(.identity)
                     }
                     .animation(BD.spring, value: w >= 980)
-                    .transition(.opacity)
                 } else {
-                    overview.transition(.opacity)
+                    overview
                 }
             }
         }

@@ -52,7 +52,7 @@ struct RootView: View {
             }
         }
         .id(state.section)
-        .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 8)), removal: .identity))
+        .transition(.identity)
     }
 }
 
@@ -228,6 +228,7 @@ struct SidebarItem: View {
         .buttonStyle(.plain)
         .onHover { hover = $0 }
         .help(collapsed ? section.rawValue : "")
+        .accessibilityLabel(section.rawValue)
     }
 }
 

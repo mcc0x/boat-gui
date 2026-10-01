@@ -165,9 +165,11 @@ struct Metric: Identifiable {
 struct MetricStrip: View {
     let metrics: [Metric]
     @Environment(\.contentWidth) var width
+    /// Largest column count that fits and divides the metrics evenly (4 → 4, 2 or 1; never 3 + 1).
     var columns: Int {
         let fit = Int(max(1, (width - 40) / 210))
-        return max(1, min(metrics.count, fit))
+        if fit >= metrics.count { return metrics.count }
+        return (1...max(1, fit)).reversed().first { metrics.count % $0 == 0 } ?? 1
     }
     var body: some View {
         let cols = columns

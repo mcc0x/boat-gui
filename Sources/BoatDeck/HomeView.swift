@@ -22,7 +22,7 @@ struct HomeView: View {
                        icon: "shippingbox", ring: concurrencyRatio, ringColor: BD.green),
                 Metric(title: "Credit", value: state.creditHours.map { String(format: "%.1fh", $0) } ?? "—",
                        sub: creditSub, icon: "clock"),
-                Metric(title: "Starts left", value: startsText, sub: startsSub, icon: "bolt", ring: startsRatio),
+                Metric(title: "Starts left", value: startsText, sub: startsSub, icon: "bolt"),
                 Metric(title: "Environments", value: "\(state.environments.count)",
                        sub: "\(state.namedSnapshots.count) named snapshots", icon: "leaf"),
             ])
@@ -68,11 +68,9 @@ struct HomeHeader: View {
     @Environment(\.contentWidth) var width
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            WaveField()
-                .frame(height: 140)
-                .offset(y: -20)
-                .opacity(0.8)
+        VStack(alignment: .leading, spacing: 6) {
+            Text(Date(), format: .dateTime.weekday(.wide).month().day())
+                .font(.system(size: 11, weight: .semibold)).foregroundStyle(BD.text3).textCase(.uppercase).tracking(0.6)
             PageHeader(title: greeting, subtitle: summary) {
                 HStack(spacing: 8) {
                     if width >= 760 {
@@ -82,9 +80,9 @@ struct HomeHeader: View {
                     Button { state.showNewSandbox = true } label: { Label("New sandbox", systemImage: "plus") }.bdButton(.primary)
                 }
             }
-            .padding(.top, 18)
-            Text(Date(), format: .dateTime.weekday(.wide).month().day())
-                .font(.system(size: 11, weight: .semibold)).foregroundStyle(BD.text3).textCase(.uppercase).tracking(0.6)
+        }
+        .background(alignment: .top) {
+            WaveField().frame(height: 130).offset(y: -24).opacity(0.8).allowsHitTesting(false)
         }
     }
 
