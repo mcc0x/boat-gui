@@ -34,32 +34,45 @@ The layout adapts to the window: the sidebar collapses to icons, columns reflow,
 
 ## Requirements
 
-- macOS 14 Sonoma or later. The Liquid Glass effect needs macOS 26 or later; older systems use the standard blur material.
-- Apple's Command Line Tools (`xcode-select --install`). Full Xcode is **not** required.
-- A boat.dev API key. Optional: the [`boat` CLI](https://docs.boat.dev/quickstart), used for SSH, port forwarding, snapshot pulls, key and org management, and as a fallback when an API call fails.
+- **To run:** macOS 14 Sonoma or later, on Apple Silicon or Intel. Liquid Glass needs macOS 26; earlier systems use blur material.
+- **To build:** Apple's **macOS 26+ SDK and Swift 6.2+**, supplied by Command Line Tools 26+ or Xcode 26+. Full Xcode is optional. The minimum runtime version is not the minimum build-tool version. Xcode 26.2 supports macOS 15.6 and later; check [Apple's toolchain requirements](https://developer.apple.com/xcode/system-requirements) for your chosen version.
+- A boat.dev API key and account. Boat usage is billed by Boat under your account's plan.
+- Optional: the [`boat` CLI](https://docs.boat.dev/cli-reference), used for SSH, port forwarding, snapshot pulls and some account administration.
+
+Install Command Line Tools with `xcode-select --install`, then check `xcrun --sdk macosx --show-sdk-version`. It must report **26 or newer**. If macOS offers only an older version, install a compatible newer toolchain or build on a newer Mac. The build script checks the SDK before compiling.
+
+CI builds and tests Apple Silicon and Intel using Xcode 26.2. Local Command Line Tools 27 / Swift 6.4 builds are also supported. The app has no third-party Swift dependencies.
 
 ## Build & install
 
 ```sh
-git clone <this repo> boat-gui && cd boat-gui
+git clone https://github.com/moneycaringcoder/boat-gui.git
+cd boat-gui
 ./build.sh            # or: make
 ```
 
-This compiles a release build, wraps it into `Boat Deck.app`, signs it ad-hoc, installs it to `~/Applications` and launches it. You can also double-click **Build Boat Deck.command** in Finder.
+This compiles a release build for your Mac's architecture, writes `build/Boat Deck.app`, signs it ad-hoc, installs it to `~/Applications` and launches it. Compilation or signing errors stop the build before installation. The build path links to a local bundle under `~/Library/Caches/BoatDeck/Builds/` so cloud-synced folders cannot attach metadata that breaks its signature. You can also double-click **Build Boat Deck.command** in Finder.
 
 | Command | Does |
 | --- | --- |
 | `make` / `./build.sh` | Build, install and launch |
+| `make build` / `./build.sh --build-only` | Build and verify `build/Boat Deck.app`; no install or launch |
 | `make install` / `./build.sh --no-open` | Build and install only |
+| `make test` | Run offline regression checks and build-script checks; no account needed |
 | `make watch` | Rebuild every time a `.rebuild` file appears (handy for remote or automated edits) |
 | `make clean` | Remove build products |
 
-The app is ad-hoc signed. To share a build with someone else, sign it with a Developer ID and notarize it.
+No Apple developer account or paid signing certificate is needed to build and use your own copy. This repository provides source and local build scripts; it does not publish signed releases or run an updater. Gatekeeper can treat a downloaded binary differently from one you compile yourself.
+
+While the repository is private, cloning requires GitHub access to it.
 
 ## First run
 
 1. Paste a boat.dev API key into the welcome screen. Alternatively, use the in-app buttons to install the CLI, log in, and let it create a key.
-2. The key is stored at `~/Library/Application Support/BoatDeck/credentials` (mode `0600`). Change it or sign out in **Settings › Account**.
+2. The key is stored at `~/Library/Application Support/BoatDeck/credentials` (file mode `0600`, directory mode `0700`). Change it or sign out in **Settings › Account**. It is a local plaintext credential, so protect your macOS account and backups.
+3. If you use CLI features, log in to the CLI separately. Boat Deck shows the CLI account before using it, and explicitly passes the selected server and wallet. The CLI may be signed in to a different account than your API key.
+
+Sign-out cancels API requests, clears account data and terminal history, and removes the old Keychain credential if present. An empty credential file remains as a sign-out marker so an old Keychain or `BOAT_API_KEY` environment value cannot silently sign you back in. Signing out of Boat Deck does not sign out the separately managed CLI.
 
 ### Keyboard shortcuts
 
@@ -83,7 +96,11 @@ scripts/dev-watch.sh     rebuild-on-trigger dev loop
 Sources/BoatDeck/
   App.swift              @main scenes (window, Settings, menu bar extra) and commands
   Store.swift            AppState: polling, actions, activity log, preferences
-  API.swift              REST client (JSON/NDJSON), errors, optional redacted trace log
+  API.swift              REST client (JSON/NDJSON), errors, paginated lists and disk downloads
+  Trace.swift            bounded metadata-only diagnostics
+  ProcessRunner.swift    subprocess deadlines, cancellation and bounded pipe reads
+  EventPager.swift       event cursors, deduplication and updates
+  LocalFiles.swift       bounded previews/uploads and atomic download saving
   System.swift           credential file, Keychain migration, boat CLI bridge, Terminal launcher
   JSON.swift             lenient JSON value + Record helpers
   Theme.swift            colours, glass, ambient background, preferences, VState
@@ -100,6 +117,8 @@ Sources/BoatDeck/
   AccountView.swift      account/billing and CLI console
   Overlays.swift         command palette, onboarding, menu bar UI
   SettingsView.swift     settings window
+Tests/BoatDeckTests/      offline regression checks (plain Swift, no XCTest required)
+.github/workflows/ci.yml  build and test only; no publishing
 ```
 
 ## Implementation notes
@@ -108,15 +127,25 @@ Sources/BoatDeck/
 - **No `.repeatForever` animations.** Continuous motion (status pulse, spinners, shimmer, waves) is computed from `TimelineView` time. A repeating animation started from an ObservableObject change can leak into everything else updated in the same transaction. Timelines pause while the window is inactive.
 - **Quiet polling.** Sandbox state is polled on an interval (Settings › General). Published state is only reassigned when it actually changes, so idle refreshes don't redraw the UI.
 - **Lenient decoding.** Responses are decoded into a dynamic `JSON` type and read with fallbacks, so new or renamed API fields don't break the app. Every detail view also shows the raw fields.
-- **API, then CLI.** Management actions try the REST API first and fall back to the equivalent `boat` command when the CLI is installed.
-- **Agent events** are read from the paginated `/events` endpoint by polling (faster while an agent is working).
+- **One write attempt.** Failed API writes and interrupted command streams are never replayed through another endpoint or credential. A lost response can mean the operation already happened; inspect its result before retrying manually.
+- **Agent events** follow ascending cursors and drain all pages before polling again. The last page is revisited to catch updated streaming events.
+- **Bounded output.** Terminal and console views keep recent output only. File previews are limited to 5 MB and uploads to 16 MB; downloads and artifact archives are saved through temporary files on disk. Use the CLI for larger uploads. Stopping a terminal stream stops watching; it does not guarantee that the remote command stops.
 
 ## Diagnostics
 
-**Settings › Advanced › Log API traffic** writes requests and responses to `~/Library/Logs/BoatDeck/api-trace.log`, with keys, secrets, variable values and tokens redacted. Turn it off when you're done.
+**Settings › Advanced › Log API traffic** writes only HTTP method, route template, status, elapsed time and byte count to `~/Library/Logs/BoatDeck/api-metadata.log`. It excludes headers, bodies, query values and resource identifiers. The log is private (`0600`), capped at 1 MiB, and disabled by default.
+
+Older versions wrote response bodies to `api-trace.log`. Those old logs are no longer used and may contain secrets; remove them before sharing diagnostic files.
 
 ## Known limitations
 
 - Agent prompting requires the provider (e.g. Codex or Claude Code) to be configured on boat.dev's Agents page. The app links there when the API reports it.
 - Some API keys can't list conversations or the provider/model catalog. The app then falls back to default choices.
-- A few write endpoints (environment variable and secret-file bodies, webhook update fields) are inferred from the docs and have CLI fallbacks.
+- Some account administration, including key rotation/revocation, requires the CLI's browser-authenticated session. API permission errors remain visible; the app never escalates them through a CLI fallback.
+- The deployment target is macOS 14; CI currently exercises macOS 15 with SDK 26.2. Older-runtime behavior still benefits from manual testing.
+
+## Contributing and license
+
+Small fixes and improvements are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the checks to run. Boat Deck is an independent client, not an official Boat app.
+
+[MIT license](LICENSE).
