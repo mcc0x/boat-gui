@@ -1,14 +1,18 @@
-.PHONY: app install watch clean
+.PHONY: app build install test watch clean
 
-# Build, install to ~/Applications and launch.
 app:
 	./build.sh
 
-# Build and install without launching.
+build:
+	./build.sh --build-only
+
 install:
 	./build.sh --no-open
 
-# Rebuild automatically whenever .rebuild is touched.
+test:
+	./scripts/test.sh
+	./scripts/test-build.sh
+
 watch:
 	./scripts/dev-watch.sh
 
