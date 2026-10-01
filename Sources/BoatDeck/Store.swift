@@ -177,20 +177,8 @@ final class AppState: ObservableObject {
         }
     }
 
-    private var probed = false
-    /// With tracing on, hits every read-only endpoint once so their shapes land in the trace log.
-    func probeIfTracing() async {
-        guard Trace.enabled, !probed else { return }
-        probed = true
-        for p in ["/me", "/limits", "/orgs", "/sandboxes", "/environments", "/named-snapshots", "/snapshots",
-                  "/webhooks", "/api-keys", "/provider-models", "/repos", "/secrets", "/account/data-retention"] {
-            _ = try? await api.call("GET", p)
-        }
-    }
-
     func refreshAll() async {
         guard hasKey else { return }
-        Task { await probeIfTracing() }
         if !loading { loading = true }
         defer { if loading { loading = false } }
         await refreshSandboxes(silent: false)

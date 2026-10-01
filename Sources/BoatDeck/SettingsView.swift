@@ -433,12 +433,12 @@ struct AdvancedPane: View {
     @AppStorage("debugTrace") private var trace = false
     var body: some View {
         SettingsGroup(title: "Diagnostics") {
-            SettingsRow(title: "Log API traffic", sub: "Writes responses (secrets redacted) to ~/Library/Logs/BoatDeck/api-trace.log.", icon: "doc.text.magnifyingglass") {
+            SettingsRow(title: "Log API traffic", sub: "Logs status, timing and byte counts only. No bodies, credentials or URL parameters.", icon: "doc.text.magnifyingglass") {
                 Toggle("", isOn: $trace).toggleStyle(.switch).labelsHidden()
             }
             SettingsRow(title: "Reveal log", icon: "folder", last: true) {
                 Button("Show in Finder") {
-                    NSWorkspace.shared.activateFileViewerSelecting([Trace.dir.appendingPathComponent("api-trace.log")])
+                    NSWorkspace.shared.activateFileViewerSelecting([Trace.dir.appendingPathComponent("api-metadata.log")])
                 }
                 .bdButton(.secondary, .small)
             }

@@ -82,10 +82,11 @@ final class BoatAPI: @unchecked Sendable {
             throw BoatError(status: 0, code: "no_api_key", message: "Add your Boat API key in Settings (⌘,).")
         }
         let req = try makeRequest(method, path, query: query, body: body, headers: headers)
+        let started = Date()
         let (data, resp) = try await session.data(for: req)
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
         let json = JSON.parse(data)
-        Trace.log(method, req.url?.absoluteString ?? path, status, json, data)
+        Trace.log(method, path, status, bytes: data.count, duration: Date().timeIntervalSince(started))
         if status >= 400 || json?["ok"]?.bool == false {
             throw BoatError(status: status,
                             code: json?["code"]?.string,
@@ -99,8 +100,10 @@ final class BoatAPI: @unchecked Sendable {
     /// Raw bytes (used for file downloads).
     func raw(_ method: String, _ path: String, query: [String: String?] = [:]) async throws -> (Data, HTTPURLResponse) {
         let req = try makeRequest(method, path, query: query)
+        let started = Date()
         let (data, resp) = try await session.data(for: req)
         guard let http = resp as? HTTPURLResponse else { throw BoatError(status: 0, code: nil, message: "No response") }
+        Trace.log(method, path, http.statusCode, bytes: data.count, duration: Date().timeIntervalSince(started))
         if http.statusCode >= 400 {
             let j = JSON.parse(data)
             throw BoatError(status: http.statusCode, code: j?["code"]?.string,
@@ -117,17 +120,17 @@ final class BoatAPI: @unchecked Sendable {
                     var req = try makeRequest(method, path, query: query, body: body)
                     req.setValue("application/x-ndjson", forHTTPHeaderField: "Accept")
                     req.timeoutInterval = 60 * 60 * 6
+                    let started = Date()
                     let (bytes, resp) = try await session.bytes(for: req)
                     let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+                    Trace.log(method, path, status, bytes: nil, duration: Date().timeIntervalSince(started))
                     if status >= 400 {
                         var buf = ""
                         for try await line in bytes.lines { buf += line; if buf.count > 800 { break } }
                         let j = JSON.parse(Data(buf.utf8))
                         throw BoatError(status: status, code: j?["code"]?.string, message: j?["message"]?.string ?? buf)
                     }
-                    var traced = 0
                     for try await line in bytes.lines {
-                        if traced < 40 { traced += 1; Trace.log(method, (req.url?.absoluteString ?? path) + " [stream]", status, JSON.parse(Data(line.utf8)), Data(line.utf8)) }
                         let t = line.trimmingCharacters(in: .whitespaces)
                         if t.isEmpty { continue }
                         let payload = t.hasPrefix("data:") ? String(t.dropFirst(5)).trimmingCharacters(in: .whitespaces) : t
@@ -291,40 +294,3 @@ final class BoatAPI: @unchecked Sendable {
 
 /// Shell single-quote.
 func shq(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }
-
-/// Optional developer trace of API traffic (secrets redacted). Enabled in Settings › Advanced.
-enum Trace {
-    static var enabled: Bool { UserDefaults.standard.bool(forKey: "debugTrace") }
-    /// ~/Library/Logs/BoatDeck — no privacy prompt needed (unlike ~/Documents).
-    static var dir: URL {
-        let d = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/BoatDeck")
-        try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
-        return d
-    }
-    static let sensitive: Set<String> = ["value", "secret", "token", "signingSecret", "contents", "content",
-                                         "apiKey", "password", "privateKey", "url_token", "key_secret"]
-
-    static func redact(_ j: JSON) -> JSON {
-        switch j {
-        case .object(let o):
-            var out: [String: JSON] = [:]
-            for (k, v) in o {
-                if sensitive.contains(k), case .string(let s) = v { out[k] = .string("‹redacted \(s.count)›") }
-                else if k.lowercased().hasSuffix("url"), case .string(let s) = v, s.contains("token") { out[k] = .string("‹redacted url›") }
-                else { out[k] = redact(v) }
-            }
-            return .object(out)
-        case .array(let a): return .array(a.map(redact))
-        default: return j
-        }
-    }
-
-    static func log(_ method: String, _ url: String, _ status: Int, _ json: JSON?, _ data: Data) {
-        guard enabled else { return }
-        let body = json.map { redact($0).pretty } ?? "‹\(data.count) bytes non-JSON›"
-        let line = "\n### \(Date()) \(method) \(url) → \(status)\n\(body.prefix(20000))\n"
-        let f = dir.appendingPathComponent("api-trace.log")
-        if let h = try? FileHandle(forWritingTo: f) { h.seekToEndOfFile(); h.write(Data(line.utf8)); try? h.close() }
-        else { try? line.write(to: f, atomically: true, encoding: .utf8) }
-    }
-}
