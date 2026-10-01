@@ -106,7 +106,7 @@ struct Sidebar: View {
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass").font(.system(size: 11.5))
                     if !collapsed {
-                        Text("Search or jump…").font(.bdBody)
+                        Text("Search or jump…").font(.bdBody).lineLimit(1)
                         Spacer()
                         Text("⌘K").font(.system(size: 10.5, weight: .medium)).foregroundStyle(BD.text3)
                             .padding(.horizontal, 5).padding(.vertical, 1)
@@ -164,7 +164,7 @@ struct Sidebar: View {
                     .frame(maxWidth: .infinity).padding(.bottom, 16)
             }
         }
-        .frame(minWidth: collapsed ? 64 : 200, idealWidth: collapsed ? 64 : 220, maxWidth: collapsed ? 64 : 280)
+        .frame(minWidth: collapsed ? 64 : 220, idealWidth: collapsed ? 64 : 220, maxWidth: collapsed ? 64 : 280)
         .frame(maxHeight: .infinity)
         .background {
             if prefs.glass && !reduceTransparency {
@@ -272,7 +272,7 @@ struct CreditCard: View {
                     .font(.system(size: 13, weight: .semibold).monospacedDigit()).foregroundStyle(BD.text)
                     .contentTransition(.numericText())
                 Text("credit · \(Int(running))\(limit.map { "/\(Int($0))" } ?? "") running")
-                    .font(.system(size: 11.5)).foregroundStyle(BD.text2)
+                    .font(.system(size: 11.5)).foregroundStyle(BD.text2).lineLimit(1).minimumScaleFactor(0.85)
             }
             Spacer(minLength: 0)
         }

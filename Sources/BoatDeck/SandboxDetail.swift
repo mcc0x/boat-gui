@@ -32,7 +32,7 @@ struct SandboxDetailView: View {
             VStack(alignment: .leading, spacing: 0) {
                 header(w)
                     .padding(.horizontal, gutter).padding(.top, 22).padding(.bottom, 18)
-                UnderlineTabs(tabs: DetailTab.allCases, selection: $tab, iconsOnly: w < 580)
+                UnderlineTabs(tabs: DetailTab.allCases, selection: $tab)
                     .padding(.horizontal, gutter)
                 Hairline()
                 Group {
@@ -105,9 +105,15 @@ extension EnvironmentValues {
 struct UnderlineTabs: View {
     let tabs: [DetailTab]
     @Binding var selection: DetailTab
-    var iconsOnly = false
-    @VNamespace private var ns
     var body: some View {
+        ViewThatFits(in: .horizontal) {
+            bar(iconsOnly: false)
+            bar(iconsOnly: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    func bar(iconsOnly: Bool) -> some View {
         HStack(spacing: iconsOnly ? 6 : 20) {
             ForEach(tabs) { t in
                 let on = t == selection
@@ -121,7 +127,7 @@ struct UnderlineTabs: View {
                         .padding(.horizontal, iconsOnly ? 8 : 0)
                         ZStack {
                             Rectangle().fill(Color.clear).frame(height: 2)
-                            if on { Capsule().fill(BD.text).frame(height: 2).matchedGeometryEffect(id: "u", in: ns) }
+                            if on { Capsule().fill(BD.text).frame(height: 2) }
                         }
                     }
                     .fixedSize()
@@ -131,8 +137,8 @@ struct UnderlineTabs: View {
                 .help(t.rawValue)
                 .accessibilityLabel(t.rawValue)
             }
-            Spacer(minLength: 0)
         }
+        .fixedSize(horizontal: true, vertical: false)
     }
 }
 
