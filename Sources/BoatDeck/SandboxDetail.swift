@@ -149,7 +149,7 @@ struct LifecycleButtons: View {
                 Button { act("Resuming") { try await $0.resume(id) } } label: { Label("Resume", systemImage: "play.fill") }
                     .bdButton(.primary)
             } else {
-                Button { if let p = state.cliPath { BoatCLI.openInTerminal(p, ["ssh", id]) } } label: { Label("SSH", systemImage: "terminal") }
+                Button { state.openCLI(["ssh", id]) } label: { Label("SSH", systemImage: "terminal") }
                     .bdButton().disabled(state.cliPath == nil)
                     .help(state.cliPath == nil ? "Install the boat CLI to use SSH" : "Open an SSH session in Terminal")
                 Button { act("Stopping (snapshotting)") { try await $0.stop(id) } } label: {
@@ -368,6 +368,7 @@ struct AccessTab: View {
     @VState private var fwdRemote = "3000"
     @VState private var fwdLocal = ""
     @VState private var forwards: [Forward] = []
+    @VState private var pendingForward: Task<Void, Never>?
     @VState private var sshKey = ""
     @Environment(\.detailGutter) var gutter
 
@@ -422,7 +423,7 @@ struct AccessTab: View {
                 }
                 card("SSH", "terminal", "Shell into the sandbox, or authorize one of your keys.") {
                     FlowLayout(spacing: 8) {
-                        Button { if let p = state.cliPath { BoatCLI.openInTerminal(p, ["ssh", id]) } } label: { Label("Open in Terminal", systemImage: "terminal") }
+                        Button { state.openCLI(["ssh", id]) } label: { Label("Open in Terminal", systemImage: "terminal") }
                             .bdButton(.primary, .small).disabled(state.cliPath == nil)
                         CopyChip(value: "boat ssh \(id)")
                     }
@@ -442,7 +443,7 @@ struct AccessTab: View {
             .animation(BD.spring, value: forwards.count)
         }
         .scrollContentBackground(.hidden)
-        .onDisappear { forwards.forEach { $0.stop() } }
+        .onDisappear { pendingForward?.cancel(); forwards.forEach { $0.stop() } }
     }
 
     func card<C: View>(_ title: String, _ icon: String, _ sub: String, @ViewBuilder _ c: () -> C) -> some View {
@@ -487,14 +488,19 @@ struct AccessTab: View {
     }
 
     func startForward() {
-        guard let cli = state.cliPath else { return }
         var args = ["forward", id, "--remote", fwdRemote]
         if !fwdLocal.isEmpty { args += ["--local", fwdLocal] }
-        let (stream, stop) = BoatCLI.stream(cli, args)
-        let label = "localhost:\(fwdLocal.isEmpty ? fwdRemote : fwdLocal) → :\(fwdRemote)"
-        forwards.append(Forward(label: label, stop: stop))
-        Task { for await chunk in stream { if chunk.contains("[exit") { state.toast("Forward ended: \(label)", error: true) } } }
+        pendingForward?.cancel()
+        pendingForward = Task {
+            guard let (cli, arguments) = await state.prepareCLI(args), !Task.isCancelled else { pendingForward = nil; return }
+            pendingForward = nil
+            let (stream, stop) = BoatCLI.stream(cli, arguments)
+            let label = "localhost:\(fwdLocal.isEmpty ? fwdRemote : fwdLocal) → :\(fwdRemote)"
+            forwards.append(Forward(label: label, stop: stop))
+            for await chunk in stream { if chunk.contains("[exit") { state.toast("Forward ended: \(label)") } }
+        }
     }
+
 }
 
 // MARK: - Snapshots of one sandbox

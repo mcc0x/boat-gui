@@ -219,6 +219,7 @@ struct CLIConsoleView: View {
     @VState private var args = ""
     @VState private var output = ""
     @VState private var running = false
+    @VState private var task: Task<Void, Never>?
     @VState private var stopper: (() -> Void)?
 
     let presets = ["status", "list", "limits", "env list", "snapshot list", "webhook list", "api-key list",
@@ -228,7 +229,7 @@ struct CLIConsoleView: View {
         Page {
             PageHeader(title: "Console", subtitle: state.cliPath.map { "Running \($0)" } ?? "The boat CLI isn't installed yet.") {
                 HStack {
-                    Button { if let p = state.cliPath { BoatCLI.openInTerminal(p, args.isEmpty ? ["status"] : split(args)) } } label: {
+                    Button { state.openCLI(args.isEmpty ? ["status"] : split(args)) } label: {
                         Label("Open in Terminal", systemImage: "arrow.up.forward.app")
                     }
                     .bdButton().disabled(state.cliPath == nil)
@@ -259,7 +260,7 @@ struct CLIConsoleView: View {
                     TextField("", text: $args, prompt: Text("list --json").foregroundColor(.white.opacity(0.25)))
                         .textFieldStyle(.plain).font(.system(size: 13, design: .monospaced)).foregroundColor(.white)
                         .onSubmit { run() }
-                    if running { Spinner(size: 12, color: .white.opacity(0.6)); Button("Stop") { stopper?(); running = false }.bdButton(.danger, .small) }
+                    if running { Spinner(size: 12, color: .white.opacity(0.6)); Button("Stop") { task?.cancel(); stopper?() }.bdButton(.danger, .small) }
                     Button("Clear") { output = "" }.bdButton(.ghost, .small)
                 }
                 .padding(12)
@@ -269,6 +270,7 @@ struct CLIConsoleView: View {
             .environment(\.colorScheme, .dark)
             .appear(delay: 0.05)
         }
+        .onDisappear { task?.cancel(); stopper?() }
     }
 
     func split(_ s: String) -> [String] {
@@ -284,18 +286,20 @@ struct CLIConsoleView: View {
     }
 
     func run() {
-        guard let cli = state.cliPath else { output += "boat CLI not found. Install: curl -fsSL https://boat.dev/install | sh\n"; return }
+        guard !running else { return }
+        guard state.cliPath != nil else { output += "boat CLI not found. Install it in Settings › CLI.\n"; return }
         let a = split(args)
         if ["ssh", "login", "onboard"].contains(a.first ?? "") {
-            BoatCLI.openInTerminal(cli, a); output += "→ opened `boat \(args)` in Terminal (interactive)\n"; return
+            state.openCLI(a); output += "→ opened `boat \(args)` in Terminal (interactive)\n"; return
         }
         output += "\n$ boat \(args)\n"
         running = true
-        let (stream, stop) = BoatCLI.stream(cli, a + ["--no-update"])
-        stopper = stop
-        Task {
-            for await chunk in stream { output += stripANSI(chunk) }
-            running = false
+        task = Task {
+            defer { running = false; stopper = nil }
+            guard let (cli, arguments) = await state.prepareCLI(a), !Task.isCancelled else { return }
+            let (stream, stop) = BoatCLI.stream(cli, arguments)
+            stopper = stop
+            for await chunk in stream { output = String((output + stripANSI(chunk)).suffix(250_000)) }
             await state.refreshSandboxes(silent: true)
         }
     }

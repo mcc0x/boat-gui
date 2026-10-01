@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 import UserNotifications
 import ServiceManagement
+import AppKit
 
 enum NavSection: String, CaseIterable, Identifiable, Hashable {
     case home = "Home"
@@ -117,6 +118,7 @@ final class AppState: ObservableObject {
 
     private(set) var api: BoatAPI
     private var pollTask: Task<Void, Never>?
+    private var approvedCLIContext: String?
     private var lastStates: [String: String] = [:]
 
     init() {
@@ -181,6 +183,7 @@ final class AppState: ObservableObject {
         api.cancel()
         api = BoatAPI(baseURL: apiURL, apiKey: apiKey, org: org.isEmpty ? nil : org)
         sessionID = UUID()
+        approvedCLIContext = nil
         sandboxes = []; environments = []; namedSnapshots = []
         me = nil; limits = nil; catalog = [:]; efforts = [:]; activity = []; lastStates = [:]
         loadedOnce = false; loading = false; lastError = nil; connection = .unknown
@@ -334,13 +337,59 @@ final class AppState: ObservableObject {
         await run(label, refresh: false, op) != nil
     }
 
-    /// Runs a boat CLI command and toasts the outcome.
+    /// CLI sessions are independent of API keys. Require an explicit account choice before using one.
+    func prepareCLI(_ args: [String]) async -> (String, [String])? {
+        guard let binary = cliPath else { toast("boat CLI not found — set it up in Settings › CLI", error: true); return nil }
+        let generation = sessionID
+        let client = api
+        do {
+            // Validate the endpoint before passing it to another client.
+            _ = try client.makeRequest("GET", "/me")
+            let info = try await client.limits()
+            guard sessionID == generation, !Task.isCancelled else { return nil }
+            let wallet = client.org ?? info["teamId"]?.string ?? "personal"
+            let context = CLIContext(apiURL: client.baseURL, organization: wallet)
+            let status = await BoatCLI.run(binary, context.arguments + ["status", "--json"], timeout: 15)
+            guard sessionID == generation, !Task.isCancelled else { return nil }
+            guard status.exitCode == 0,
+                  let identifier = status.json?["account"]?["identifier"]?.string, !identifier.isEmpty,
+                  status.json?["account"]?["loginState"]?.string != "signed out" else {
+                toast("Sign in to the boat CLI in Settings › CLI before using CLI actions.", error: true)
+                return nil
+            }
+            let fingerprint = [binary, identifier, context.endpoint, wallet].joined(separator: "\n")
+            if approvedCLIContext != fingerprint {
+                let alert = NSAlert()
+                alert.messageText = "Use this CLI account?"
+                alert.informativeText = "CLI account: \(identifier)\nApp account: \(userEmail ?? userName)\nServer: \(context.endpoint)\nWallet: \(wallet)\n\nThe CLI uses its own saved login. This choice lasts until you switch accounts or restart Boat Deck."
+                alert.addButton(withTitle: "Use CLI account")
+                alert.addButton(withTitle: "Cancel")
+                guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+                approvedCLIContext = fingerprint
+            }
+            return (binary, context.arguments + args)
+        } catch {
+            if sessionID == generation { toast("Could not prepare CLI context: \(error.localizedDescription)", error: true) }
+            return nil
+        }
+    }
+
+    func openCLI(_ args: [String]) {
+        Task {
+            guard let (binary, arguments) = await prepareCLI(args) else { return }
+            BoatCLI.openInTerminal(binary, arguments)
+        }
+    }
+
     @discardableResult
     func cli(_ label: String, _ args: [String]) async -> CLIResult? {
-        guard let p = cliPath else { toast("boat CLI not found — set it up in Settings › CLI", error: true); return nil }
-        let r = await BoatCLI.run(p, args)
-        if r.exitCode == 0 { toast(label) } else { toast("\(label) failed — \((r.stderr + r.stdout).prefix(240))", error: true) }
-        return r
+        let generation = sessionID
+        guard let (binary, arguments) = await prepareCLI(args) else { return nil }
+        let result = await BoatCLI.run(binary, arguments)
+        guard sessionID == generation, !Task.isCancelled else { return nil }
+        if result.exitCode == 0 { toast(label) }
+        else { toast("\(label) failed — \((result.stderr + result.stdout).prefix(240))", error: true) }
+        return result
     }
 
     // MARK: Sandbox helpers

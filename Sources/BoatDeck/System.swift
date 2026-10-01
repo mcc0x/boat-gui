@@ -71,6 +71,19 @@ struct CLIResult {
     var json: JSON? { JSON.parse(Data(stdout.utf8)) }
 }
 
+struct CLIContext {
+    let endpoint: String
+    let organization: String
+    init(apiURL: String, organization: String) {
+        var base = apiURL
+        while base.hasSuffix("/") { base.removeLast() }
+        // The CLI expects the server root and adds /api/v1 itself.
+        endpoint = base.hasSuffix("/api/v1") ? String(base.dropLast(7)) : base
+        self.organization = organization
+    }
+    var arguments: [String] { ["--api-url", endpoint, "--org", organization, "--no-update"] }
+}
+
 enum BoatCLI {
     static var candidates: [String] {
         let home = FileManager.default.homeDirectoryForCurrentUser.path

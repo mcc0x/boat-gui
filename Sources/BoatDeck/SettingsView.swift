@@ -418,7 +418,7 @@ struct CLIPane: View {
                 }
             }
         }
-        Text("The CLI powers SSH, port forwarding, snapshot pulls, key management and org administration, and acts as a fallback when an API call fails.")
+        Text("The CLI uses its own saved login for SSH, port forwarding, snapshot pulls and account administration. Boat Deck asks which CLI account to use and passes the selected server and wallet explicitly. API errors are never retried through the CLI.")
             .font(.bdSmall).foregroundStyle(BD.text3)
             .task(id: state.cliPath) {
                 guard let p = state.cliPath else { return }

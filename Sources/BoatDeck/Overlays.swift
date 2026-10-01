@@ -39,9 +39,9 @@ struct CommandPalette: View {
             out.append(PaletteItem(title: sb.displayName, subtitle: "\(sb.id) · \(sb.state)", icon: "shippingbox", group: "Sandboxes", state: sb.state) {
                 state.open(sandbox: sb.id)
             })
-            if sb.isActive, let cli = state.cliPath {
+            if sb.isActive, state.cliPath != nil {
                 out.append(PaletteItem(title: "SSH into \(sb.displayName)", subtitle: sb.id, icon: "terminal", group: "Sandboxes") {
-                    BoatCLI.openInTerminal(cli, ["ssh", sb.id])
+                    state.openCLI(["ssh", sb.id])
                 })
             }
         }
@@ -312,7 +312,7 @@ struct MenuRow: View {
                 if s.isArchived {
                     IconButton(icon: "play.fill", help: "Resume", size: 22) { Task { await state.run("Resuming") { try await $0.resume(s.id) } } }
                 } else {
-                    IconButton(icon: "terminal", help: "SSH", size: 22) { if let p = state.cliPath { BoatCLI.openInTerminal(p, ["ssh", s.id]) } }
+                    IconButton(icon: "terminal", help: "SSH", size: 22) { state.openCLI(["ssh", s.id]) }
                     IconButton(icon: "stop.fill", help: "Stop", size: 22) { Task { await state.run("Stopping") { try await $0.stop(s.id) } } }
                 }
             }

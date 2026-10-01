@@ -262,7 +262,7 @@ struct SandboxQuickActions: View {
     var body: some View {
         Button("Open") { state.open(sandbox: id) }
         Button("Copy ID") { copyToClipboard(id) }
-        Button("SSH in Terminal") { if let p = state.cliPath { BoatCLI.openInTerminal(p, ["ssh", id]) } }
+        Button("SSH in Terminal") { state.openCLI(["ssh", id]) }
             .disabled(state.cliPath == nil)
         Button("Open Desktop") {
             Task {

@@ -1,6 +1,9 @@
 import Foundation
 
 func testProcesses() async throws {
+    let context = CLIContext(apiURL: "https://example.invalid/api/v1/", organization: "org with spaces")
+    try expectEqual(context.endpoint, "https://example.invalid")
+    try expectEqual(context.arguments, ["--api-url", "https://example.invalid", "--org", "org with spaces", "--no-update"])
     let start = Date()
     let timed = BoatCLI.runSync("/bin/sh", ["-c", "exec >/dev/null 2>&1; exec sleep 10"], timeout: 0.1)
     try expectEqual(timed.exitCode, 124)

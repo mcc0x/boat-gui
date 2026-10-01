@@ -155,8 +155,8 @@ struct NamedSnapshotCard: View {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.canCreateDirectories = true
         panel.prompt = "Pull here"
-        guard panel.runModal() == .OK, let url = panel.url, let cli = state.cliPath else { return }
-        BoatCLI.openInTerminal(cli, ["snapshot", "pull", name, "--output", url.path])
+        guard panel.runModal() == .OK, let url = panel.url, state.cliPath != nil else { return }
+        state.openCLI(["snapshot", "pull", name, "--output", url.path])
     }
 }
 
@@ -412,7 +412,7 @@ struct APIKeysView: View {
             .bdButton(.ghost, .small)
         Button("Rotate") {
             guard confirm("Rotate key?", "The old secret stops working.", destructive: "Rotate") else { return }
-            Task { if let r = await state.cli("Key rotated", ["api-key", "rotate", k.id, "--json"]) { revealSecret(r) }; await reload() }
+            Task { if let r = await state.cli("Key rotated", ["api-key", "rotate", k.id, "--json"]), r.exitCode == 0 { revealSecret(r) }; await reload() }
         }
         .bdButton(.secondary, .small).disabled(state.cliPath == nil)
         Button("Revoke") {
