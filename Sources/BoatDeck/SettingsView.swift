@@ -232,7 +232,7 @@ struct AppearancePane: View {
         SettingsGroup(title: "Theme") {
             HStack(spacing: 12) {
                 ForEach(ThemeChoice.allCases) { t in
-                    Button { withAnimation(BD.spring) { prefs.theme = t } } label: {
+                    Button { prefs.theme = t } label: {
                         VStack(spacing: 8) {
                             ThemeThumb(theme: t)
                                 .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(prefs.theme == t ? BD.text : BD.stroke, lineWidth: prefs.theme == t ? 2 : 1))
@@ -270,10 +270,10 @@ struct AppearancePane: View {
             SettingsRow(title: "Liquid glass", sub: "Translucent glass surfaces. Turn off for solid panels.", icon: "drop") {
                 Toggle("", isOn: $prefs.glass.animation(BD.spring)).toggleStyle(.switch).labelsHidden()
             }
-            SettingsRow(title: "Ambient background", sub: "Soft drifting light and a faint grid behind content.", icon: "sparkles.rectangle.stack") {
+            SettingsRow(title: "Ambient background", sub: "A subtle, stationary tint behind the workspace.", icon: "sparkles.rectangle.stack") {
                 Toggle("", isOn: $prefs.ambient.animation(BD.spring)).toggleStyle(.switch).labelsHidden()
             }
-            SettingsRow(title: "Animations", sub: "Transitions, pulsing status and live waves.", icon: "wand.and.stars") {
+            SettingsRow(title: "Animations", sub: "Transitions and activity indicators.", icon: "wand.and.stars") {
                 Toggle("", isOn: $prefs.motion).toggleStyle(.switch).labelsHidden()
             }
             SettingsRow(title: "Density", icon: "rectangle.compress.vertical", last: true) {

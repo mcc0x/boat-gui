@@ -30,7 +30,7 @@
 | **Console** | Run any `boat` CLI command. Interactive ones (`ssh`, `login`) open in Terminal. |
 | **Everywhere** | ⌘K command palette, a menu bar extra with quick actions, state-change notifications, light/dark/system themes, accent colours, and an optional glass/ambient look. |
 
-The layout adapts to the window: the sidebar collapses to icons, columns reflow, inspector panes stack, and toolbars wrap, so content fits from about 720 pt wide up to full screen.
+The layout adapts to the window: resize the sidebar and sandbox list by dragging their dividers, or collapse navigation using the top toolbar button. Narrow windows collapse navigation to icons; columns reflow and toolbars wrap, so content fits from about 720 pt wide up to full screen. Settings stays available when navigation is collapsed.
 
 ## Requirements
 
@@ -124,7 +124,7 @@ Tests/BoatDeckTests/      offline regression checks (plain Swift, no XCTest requ
 ## Implementation notes
 
 - **No SwiftUI macros.** On the macOS 27 SDK, `@State`, `@Namespace` and friends are macros whose plugins ship only with full Xcode. The code therefore uses `VState` (a small property wrapper backed by `@StateObject`) and typealiases, so it builds with the Command Line Tools alone.
-- **No `.repeatForever` animations.** Continuous motion (status pulse, spinners, shimmer, waves) is computed from `TimelineView` time. A repeating animation started from an ObservableObject change can leak into everything else updated in the same transaction. Timelines pause while the window is inactive.
+- **No `.repeatForever` animations.** Continuous motion (status pulse, spinners, shimmer) is computed from `TimelineView` time. A repeating animation started from an ObservableObject change can leak into everything else updated in the same transaction. The workspace background is stationary; status pulses pause while the window is inactive.
 - **Quiet polling.** Sandbox state is polled on an interval (Settings › General). Published state is only reassigned when it actually changes, so idle refreshes don't redraw the UI.
 - **Lenient decoding.** Responses are decoded into a dynamic `JSON` type and read with fallbacks, so new or renamed API fields don't break the app. Every detail view also shows the raw fields.
 - **One write attempt.** Failed API writes and interrupted command streams are never replayed through another endpoint or credential. A lost response can mean the operation already happened; inspect its result before retrying manually.

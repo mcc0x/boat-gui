@@ -26,6 +26,7 @@ struct BoatDeckApp: App {
                 .environmentObject(prefs)
         }
         .windowStyle(.hiddenTitleBar)
+        .windowToolbarStyle(.unifiedCompact)
         .defaultSize(width: 1320, height: 840)
         .commands {
             CommandGroup(replacing: .newItem) {

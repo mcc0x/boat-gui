@@ -38,22 +38,22 @@ private func dyn(_ dark: NSColor, _ light: NSColor) -> Color {
 private func g(_ w: CGFloat, _ a: CGFloat = 1) -> NSColor { NSColor(white: w, alpha: a) }
 
 enum BD {
-    static let bg        = dyn(g(0.035), g(0.965))
-    static let bgRaised  = dyn(g(0.075), g(1.0))
+    static let bg        = dyn(NSColor(srgbRed: 0.105, green: 0.12, blue: 0.135, alpha: 1), NSColor(srgbRed: 0.90, green: 0.915, blue: 0.91, alpha: 1))
+    static let bgRaised  = dyn(NSColor(srgbRed: 0.15, green: 0.17, blue: 0.185, alpha: 1), NSColor(srgbRed: 0.955, green: 0.965, blue: 0.96, alpha: 1))
     static let surface   = dyn(g(1, 0.045), g(0, 0.035))
     static let surfaceHi = dyn(g(1, 0.085), g(0, 0.06))
     static let stroke    = dyn(g(1, 0.09), g(0, 0.09))
     static let strokeHi  = dyn(g(1, 0.18), g(0, 0.16))
-    static let text      = dyn(g(0.97), g(0.07))
-    static let text2     = dyn(g(0.66), g(0.38))
-    static let text3     = dyn(g(0.42), g(0.58))
+    static let text      = dyn(g(0.92), g(0.12))
+    static let text2     = dyn(g(0.74), g(0.32))
+    static let text3     = dyn(g(0.61), g(0.43))
     static let inverse   = dyn(g(0.04), g(0.98))
     static let mono      = dyn(g(0.97), g(0.07))
 
     static let green  = Color(red: 0.30, green: 0.85, blue: 0.55)
     static let amber  = Color(red: 0.98, green: 0.72, blue: 0.28)
     static let red    = Color(red: 0.98, green: 0.38, blue: 0.38)
-    static let blue   = Color(red: 0.40, green: 0.62, blue: 1.00)
+    static let blue   = dyn(NSColor(srgbRed: 0.28, green: 0.49, blue: 0.86, alpha: 1), NSColor(srgbRed: 0.18, green: 0.38, blue: 0.72, alpha: 1))
     static let violet = Color(red: 0.68, green: 0.55, blue: 1.00)
     static let teal   = Color(red: 0.35, green: 0.82, blue: 0.85)
 
@@ -122,6 +122,7 @@ final class UIPrefs: ObservableObject {
 
 struct GlassCard: ViewModifier {
     @EnvironmentObject var prefs: UIPrefs
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     var radius: CGFloat = BD.r3
     var padding: CGFloat? = nil
     var interactive = false
@@ -130,7 +131,7 @@ struct GlassCard: ViewModifier {
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         let padded = content.padding(padding ?? prefs.density.pad)
-        if prefs.glass {
+        if prefs.glass && !reduceTransparency {
             if #available(macOS 26.0, *) {
                 padded
                     .glassEffect(glassValue, in: shape)
@@ -219,53 +220,37 @@ struct AppearIn: ViewModifier {
 
 // MARK: - Ambient background
 
+/// A stationary tint keeps the workspace calm and avoids continuous full-window redraws.
 struct AmbientBackground: View {
     @EnvironmentObject var prefs: UIPrefs
     @Environment(\.colorScheme) var scheme
-    @Environment(\.controlActiveState) private var active
 
     var body: some View {
         ZStack {
             BD.bg
             if prefs.ambient {
-                TimelineView(.animation(minimumInterval: 1 / 12, paused: !prefs.motion || active == .inactive)) { tl in
-                    let t = tl.date.timeIntervalSinceReferenceDate
-                    Canvas { ctx, size in
-                        let blobs: [(Double, Double, Double, Double)] = [
-                            (0.18, 0.22, 0.42, 0.00), (0.82, 0.18, 0.36, 1.7),
-                            (0.70, 0.86, 0.46, 3.1), (0.22, 0.78, 0.30, 4.4)]
-                        for (i, b) in blobs.enumerated() {
-                            let x = (b.0 + 0.06 * sin(t / 9 + b.3)) * size.width
-                            let y = (b.1 + 0.06 * cos(t / 11 + b.3 * 1.3)) * size.height
-                            let r = b.2 * max(size.width, size.height)
-                            let base: Double = scheme == .dark ? (i % 2 == 0 ? 0.075 : 0.05) : (i % 2 == 0 ? 0.05 : 0.035)
-                            let col = scheme == .dark ? Color.white.opacity(base) : Color.black.opacity(base)
-                            ctx.fill(Path(ellipseIn: CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2)),
-                                     with: .radialGradient(Gradient(colors: [col, .clear]), center: CGPoint(x: x, y: y), startRadius: 0, endRadius: r))
-                        }
-                    }
-                }
-                GridPattern().opacity(scheme == .dark ? 0.035 : 0.05)
+                LinearGradient(colors: [
+                    BD.teal.opacity(scheme == .dark ? 0.045 : 0.035),
+                    .clear,
+                    BD.blue.opacity(scheme == .dark ? 0.035 : 0.025)
+                ], startPoint: .topLeading, endPoint: .bottomTrailing)
             }
         }
         .ignoresSafeArea()
+        .allowsHitTesting(false)
     }
 }
 
-struct GridPattern: View {
-    var spacing: CGFloat = 28
-    var body: some View {
-        Canvas { ctx, size in
-            var p = Path()
-            var x: CGFloat = 0
-            while x < size.width { p.move(to: CGPoint(x: x, y: 0)); p.addLine(to: CGPoint(x: x, y: size.height)); x += spacing }
-            var y: CGFloat = 0
-            while y < size.height { p.move(to: CGPoint(x: 0, y: y)); p.addLine(to: CGPoint(x: size.width, y: y)); y += spacing }
-            ctx.stroke(p, with: .color(BD.text), lineWidth: 0.5)
-        }
-        .mask(RadialGradient(colors: [.black, .clear], center: .top, startRadius: 0, endRadius: 900))
-        .allowsHitTesting(false)
+/// Real behind-window vibrancy, rather than a translucent layer over an opaque canvas.
+struct SidebarMaterial: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = .sidebar
+        view.blendingMode = .behindWindow
+        view.state = .followsWindowActiveState
+        return view
     }
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {}
 }
 
 // MARK: - Typography helpers
@@ -275,9 +260,9 @@ extension Font {
     static let bdH2 = Font.system(size: 17, weight: .semibold)
     static let bdH3 = Font.system(size: 13, weight: .semibold)
     static let bdBody = Font.system(size: 13)
-    static let bdSmall = Font.system(size: 11.5)
+    static let bdSmall = Font.system(size: 12)
     static let bdMono = Font.system(size: 12, design: .monospaced)
-    static let bdMonoSmall = Font.system(size: 11, design: .monospaced)
+    static let bdMonoSmall = Font.system(size: 11.5, design: .monospaced)
     static let bdStat = Font.system(size: 30, weight: .semibold, design: .rounded)
 }
 
@@ -285,8 +270,8 @@ struct Eyebrow: View {
     let text: String
     var body: some View {
         Text(text.uppercased())
-            .font(.system(size: 10.5, weight: .semibold))
-            .tracking(0.8)
+            .font(.system(size: 11, weight: .medium))
+            .tracking(0.6)
             .foregroundStyle(BD.text3)
     }
 }

@@ -22,10 +22,10 @@ private struct BDButtonBody: View {
     @VState private var hover = false
 
     var body: some View {
-        let h: CGFloat = size == .small ? 24 : size == .large ? 36 : 30
-        let shape = Capsule(style: .continuous)
+        let h: CGFloat = size == .small ? 26 : size == .large ? 38 : 32
+        let shape = RoundedRectangle(cornerRadius: size == .small ? 7 : 9, style: .continuous)
         configuration.label
-            .font(.system(size: size == .small ? 11.5 : 12.5, weight: .medium))
+            .font(.system(size: size == .small ? 12 : 13, weight: .medium))
             .labelStyle(TightLabel())
             .lineLimit(1)
             .fixedSize(horizontal: true, vertical: false)
@@ -33,7 +33,7 @@ private struct BDButtonBody: View {
             .frame(height: h)
             .foregroundStyle(fg)
             .background(bg, in: shape)
-            .overlay(shape.strokeBorder(kind == .primary ? Color.clear : (hover ? BD.strokeHi : BD.stroke), lineWidth: 1))
+            .overlay(shape.strokeBorder(kind == .primary || kind == .ghost ? Color.clear : (hover ? BD.strokeHi : BD.stroke), lineWidth: 1))
             .opacity(enabled ? 1 : 0.45)
             .scaleEffect(configuration.isPressed && prefs.motion ? 0.97 : 1)
             .animation(BD.snappy, value: configuration.isPressed)
@@ -87,12 +87,12 @@ struct IconButton: View {
                 .font(.system(size: size * 0.42, weight: .medium))
                 .foregroundStyle(hover ? BD.text : tint)
                 .frame(width: size, height: size)
-                .background(hover ? BD.surfaceHi : BD.surface, in: Circle())
-                .overlay(Circle().strokeBorder(BD.stroke, lineWidth: 1))
+                .background(hover ? BD.surfaceHi : .clear, in: RoundedRectangle(cornerRadius: 8))
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .help(help)
+        .accessibilityLabel(help.isEmpty ? icon : help)
         .onHover { hover = $0 }
         .animation(BD.soft, value: hover)
     }
@@ -118,7 +118,7 @@ struct StatusDot: View {
                 }
             }
             Circle().fill(colorForState(state)).frame(width: size, height: size)
-                .shadow(color: colorForState(state).opacity(0.7), radius: live ? 3 : 0)
+
         }
         .frame(width: size * 2.3, height: size * 2.3)
     }
@@ -193,13 +193,13 @@ struct RingGauge: View {
         ZStack {
             Circle().stroke(BD.surfaceHi, lineWidth: lineWidth)
             Circle()
-                .trim(from: 0, to: max(0.001, min(1, shown)))
+                .trim(from: 0, to: max(0, min(1, shown)))
                 .stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
                 .rotationEffect(.degrees(-90))
-                .shadow(color: color.opacity(0.35), radius: 4)
+
         }
         .onAppear { withAnimation(prefs.motion ? .spring(response: 1.0, dampingFraction: 0.85) : nil) { shown = value } }
-        .onChange(of: value) { _, v in withAnimation(BD.spring) { shown = v } }
+        .onChange(of: value) { _, v in withAnimation(prefs.motion ? BD.spring : nil) { shown = v } }
     }
 }
 
@@ -317,7 +317,7 @@ struct PillOption<T: Hashable>: Identifiable {
     let value: T
     let label: String
     var icon: String? = nil
-    var id: String { label }
+    var id: T { value }
 }
 
 /// Pill-style segmented control with a sliding selection indicator.

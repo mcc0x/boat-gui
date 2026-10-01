@@ -81,9 +81,6 @@ struct HomeHeader: View {
                 }
             }
         }
-        .background(alignment: .top) {
-            WaveField().frame(height: 130).offset(y: -24).opacity(0.8).allowsHitTesting(false)
-        }
     }
 
     var summary: String {

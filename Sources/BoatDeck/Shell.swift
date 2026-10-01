@@ -12,14 +12,16 @@ struct RootView: View {
                     .transition(.opacity.combined(with: .scale(scale: 0.98)))
             } else {
                 GeometryReader { geo in
-                    HStack(spacing: 0) {
+                    HSplitView {
                         Sidebar()
                         content
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .frame(minWidth: 440, maxWidth: .infinity, maxHeight: .infinity)
+                            .layoutPriority(1)
                     }
-                    // Narrow windows get the icon-only sidebar automatically.
-                    .environment(\.sidebarCollapsed, prefs.sidebarCollapsed || geo.size.width < 900)
-                    .animation(BD.spring, value: geo.size.width < 900)
+                    .environment(\.sidebarCollapsed, prefs.sidebarCollapsed)
+                    .onChange(of: geo.size.width < 900) { _, narrow in
+                        if narrow { prefs.sidebarCollapsed = true }
+                    }
                 }
                 .transition(.opacity)
             }
@@ -27,6 +29,16 @@ struct RootView: View {
                 CommandPalette()
                     .transition(.opacity)
                     .zIndex(10)
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Button { prefs.sidebarCollapsed.toggle() } label: {
+                    Image(systemName: "sidebar.left")
+                }
+                .help("Toggle sidebar (⌘\\)")
+                .accessibilityLabel("Toggle sidebar")
+                .disabled(!state.hasKey)
             }
         }
         .overlay(alignment: .bottomTrailing) { ToastOverlay() }
@@ -66,22 +78,29 @@ struct Sidebar: View {
     @Environment(\.openSettings) private var openSettings
 
     @Environment(\.sidebarCollapsed) var collapsed
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    var accountLabel: String {
+        let user = state.me?["user"] ?? state.me ?? .null
+        let identifier = user.first("login", "username", "email")?.string ?? "Account"
+        return identifier.split(separator: "@").first.map(String.init) ?? "Account"
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Traffic-light clearance + logo
+            // Brand stays below the native window toolbar.
             HStack(spacing: 10) {
                 LogoMark(size: 26)
                 if !collapsed {
                     VStack(alignment: .leading, spacing: 0) {
                         Text("Boat Deck").font(.system(size: 14, weight: .semibold)).foregroundStyle(BD.text)
-                        Text("boat.dev control").font(.system(size: 10.5)).foregroundStyle(BD.text3)
+                        Text("boat.dev control").font(.system(size: 11.5)).foregroundStyle(BD.text2)
                     }
                     .transition(.opacity)
                 }
                 Spacer(minLength: 0)
             }
-            .padding(.top, 44).padding(.horizontal, collapsed ? 17 : 16).padding(.bottom, 18)
+            .padding(.top, 18).padding(.horizontal, collapsed ? 17 : 16).padding(.bottom, 18)
 
             Button { state.showPalette = true } label: {
                 HStack(spacing: 8) {
@@ -116,39 +135,44 @@ struct Sidebar: View {
             if !collapsed { CreditCard().padding(.horizontal, 12).padding(.bottom, 10).transition(.opacity) }
 
             HStack(spacing: 8) {
-                Avatar(name: state.userName, size: 26)
-                if !collapsed {
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text(state.userEmail ?? state.userName).font(.system(size: 11.5, weight: .medium)).foregroundStyle(BD.text).lineLimit(1)
-                        HStack(spacing: 4) {
-                            Circle().fill(connColor).frame(width: 5, height: 5)
-                            Text(connText).font(.system(size: 10)).foregroundStyle(BD.text3)
+                Button { state.go(.account) } label: {
+                    HStack(spacing: 8) {
+                        Avatar(name: accountLabel, size: 28)
+                        if !collapsed {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(accountLabel).font(.system(size: 12.5, weight: .medium)).foregroundStyle(BD.text).lineLimit(1)
+                                HStack(spacing: 4) {
+                                    Circle().fill(connColor).frame(width: 5, height: 5)
+                                    Text(connText).font(.system(size: 11)).foregroundStyle(BD.text2)
+                                }
+                            }
                         }
                     }
+                }
+                .buttonStyle(.plain)
+                .help("Account")
+                .accessibilityLabel("Account")
+                if !collapsed {
                     Spacer(minLength: 0)
-                    IconButton(icon: "gearshape", help: "Settings (⌘,)", size: 26) { openSettings() }
+                    IconButton(icon: "gearshape", help: "Settings (⌘,)", size: 30) { openSettings() }
                 }
             }
-            .padding(.horizontal, collapsed ? 17 : 14).padding(.bottom, 14)
+            .padding(.horizontal, collapsed ? 17 : 14).padding(.bottom, collapsed ? 10 : 18)
 
-            HStack {
-                Spacer()
-                IconButton(icon: collapsed ? "sidebar.right" : "sidebar.left", help: "Toggle sidebar (⌘\\)", size: 22, tint: BD.text3) {
-                    withAnimation(BD.spring) { prefs.sidebarCollapsed.toggle() }
-                }
-                if collapsed { Spacer() }
+            if collapsed {
+                IconButton(icon: "gearshape", help: "Settings (⌘,)", size: 30) { openSettings() }
+                    .frame(maxWidth: .infinity).padding(.bottom, 16)
             }
-            .padding(.horizontal, 12).padding(.bottom, 12)
         }
-        .frame(width: collapsed ? 64 : 232)
+        .frame(minWidth: collapsed ? 64 : 200, idealWidth: collapsed ? 64 : 220, maxWidth: collapsed ? 64 : 280)
+        .frame(maxHeight: .infinity)
         .background {
-            ZStack {
-                if prefs.glass { Rectangle().fill(.ultraThinMaterial).opacity(0.6) }
-                BD.bg.opacity(prefs.glass ? 0.35 : 1)
+            if prefs.glass && !reduceTransparency {
+                SidebarMaterial().overlay(BD.bg.opacity(0.12)).ignoresSafeArea()
+            } else {
+                BD.bgRaised.ignoresSafeArea()
             }
-            .ignoresSafeArea()
         }
-        .overlay(alignment: .trailing) { Rectangle().fill(BD.stroke).frame(width: 1).ignoresSafeArea() }
     }
 
     var connColor: Color {
@@ -248,13 +272,12 @@ struct CreditCard: View {
                     .font(.system(size: 13, weight: .semibold).monospacedDigit()).foregroundStyle(BD.text)
                     .contentTransition(.numericText())
                 Text("credit · \(Int(running))\(limit.map { "/\(Int($0))" } ?? "") running")
-                    .font(.system(size: 10.5)).foregroundStyle(BD.text3)
+                    .font(.system(size: 11.5)).foregroundStyle(BD.text2)
             }
             Spacer(minLength: 0)
         }
         .padding(10)
-        .background(BD.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(BD.stroke, lineWidth: 1))
+        .background(BD.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .tapAction { withAnimation(BD.spring) { state.section = .account } }
     }
 }

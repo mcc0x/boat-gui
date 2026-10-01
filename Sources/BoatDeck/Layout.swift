@@ -47,7 +47,7 @@ struct Page<Content: View>: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: w.widthClass == .compact ? 22 : 30) { content() }
                     .padding(.horizontal, gutter(w))
-                    .padding(.top, 44).padding(.bottom, 36)
+                    .padding(.top, 22).padding(.bottom, 32)
                     .frame(maxWidth: maxWidth, alignment: .leading)
                     .frame(maxWidth: .infinity)
             }
