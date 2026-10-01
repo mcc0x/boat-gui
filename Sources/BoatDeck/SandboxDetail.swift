@@ -216,7 +216,7 @@ struct OverviewTab: View {
                         Button { Task { await extend(3600) } } label: { Label("+1 hour", systemImage: "clock.arrow.circlepath") }.bdButton()
                         Button { Task { await extend(4 * 3600) } } label: { Label("+4 hours", systemImage: "clock.badge.plus") }.bdButton()
                         Button {
-                            Task { await state.runOrCLI("Auto-stop disabled", cli: ["extend", id, "--no-auto-stop"]) { try await $0.updateSandbox(id, ["noAutoStop": true, "ttlSeconds": 0]) }; await load() }
+                            Task { await state.runAction("Auto-stop disabled") { try await $0.updateSandbox(id, ["noAutoStop": true, "ttlSeconds": 0]) }; await load() }
                         } label: { Label("Keep running", systemImage: "infinity") }.bdButton()
                         Button { Task { await state.run("Forked") { try await $0.fork(id) } } } label: { Label("Fork", systemImage: "arrow.triangle.branch") }.bdButton()
                         Button {
@@ -337,7 +337,7 @@ struct OverviewTab: View {
     func extend(_ secs: Double) async {
         // New lifetime measured from now: whatever is left plus the extension.
         let ttl = max(0, remaining ?? 0) + secs
-        await state.runOrCLI("Extended by \(durationText(secs))", cli: ["extend", id, "--ttl", "\(Int(ttl))"]) {
+        await state.runAction("Extended by \(durationText(secs))") {
             try await $0.updateSandbox(id, ["ttlSeconds": .number(ttl.rounded())])
         }
         await load()

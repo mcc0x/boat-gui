@@ -141,7 +141,7 @@ struct NamedSnapshotCard: View {
                     Divider()
                     Button("Delete…", role: .destructive) {
                         guard confirm("Delete named snapshot \(name)?", "") else { return }
-                        Task { await state.runOrCLI("Deleted \(name)", cli: ["snapshot", "rm", name]) { try await $0.deleteNamedSnapshot(name) }; await reload() }
+                        Task { await state.runAction("Deleted \(name)") { try await $0.deleteNamedSnapshot(name) }; await reload() }
                     }
                 } label: { Image(systemName: "ellipsis").frame(width: 24, height: 24) }
                 .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
@@ -272,7 +272,7 @@ struct WebhookRow: View {
             .bdButton(.ghost, .small)
             IconButton(icon: "trash", size: 26) {
                 guard confirm("Delete webhook?", h["url"] ?? h.id) else { return }
-                Task { await state.runOrCLI("Webhook deleted", cli: ["webhook", "remove", h.id]) { try await $0.deleteWebhook(h.id) }; await reload() }
+                Task { await state.runAction("Webhook deleted") { try await $0.deleteWebhook(h.id) }; await reload() }
             }
         }
         .padding(.horizontal, 16).padding(.vertical, 12)
@@ -331,7 +331,7 @@ struct APIKeysView: View {
                         .bdButton(.primary).disabled(name.isEmpty)
                 }
                 if state.cliPath == nil {
-                    Label("Uses your admin key if it can, otherwise the boat CLI (Settings › CLI).", systemImage: "info.circle")
+                    Label("Creating keys requires an admin API key. CLI account management is available in Console.", systemImage: "info.circle")
                         .font(.bdSmall).foregroundStyle(BD.text3)
                 }
             }
@@ -384,11 +384,7 @@ struct APIKeysView: View {
 
     func reload() async {
         do {
-            var k = try await state.api.apiKeys()
-            if k.isEmpty, let cli = state.cliPath {
-                let r = await BoatCLI.run(cli, ["api-key", "list", "--all", "--json"])
-                k = (r.json?.list("apiKeys", "keys") ?? []).map(Record.init)
-            }
+            let k = try await state.api.apiKeys()
             withAnimation(BD.spring) { keys = k }
             error = nil
         } catch { self.error = error.localizedDescription }
@@ -396,29 +392,19 @@ struct APIKeysView: View {
     }
 
     func create() async {
-        // Try the REST endpoint first (works with an admin-scoped key); fall back to the CLI.
         var body: [String: JSON] = ["name": .string(name), "preset": .string(preset)]
         if let d = Int(ttlDays) { body["ttlDays"] = .number(Double(d)) }
         if !sandbox.isEmpty { body["sandboxId"] = .string(sandbox) }
         if !envName.isEmpty { body["environment"] = .string(envName) }
-        if let r = try? await state.api.call("POST", "/api-keys/scoped", body: .object(body)),
-           let s = r.first("key", "secret", "token")?.string ?? r["apiKey"]?.first("key", "secret", "token")?.string {
-            state.toast("Key created")
-            showSecret("API key", s)
+        if let r = await state.run("Key created", refresh: false, { try await $0.call("POST", "/api-keys/scoped", body: .object(body)) }) {
+            if let s = r.first("key", "secret", "token")?.string ?? r["apiKey"]?.first("key", "secret", "token")?.string {
+                showSecret("API key", s)
+            } else {
+                state.toast("Key created, but its secret was not returned. Check API Keys before trying again.", error: true)
+            }
             name = ""
             await reload()
-            return
         }
-        guard state.cliPath != nil else {
-            state.toast("Creating keys needs an admin key or the boat CLI", error: true)
-            return
-        }
-        var args = ["api-key", "create", name, "--preset", preset, "--json"]
-        if !ttlDays.isEmpty { args += ["--ttl", ttlDays] }
-        if !sandbox.isEmpty { args += ["--sandbox", sandbox] }
-        if !envName.isEmpty { args += ["--env", envName] }
-        if let r = await state.cli("Key created", args), r.exitCode == 0 { revealSecret(r); name = "" }
-        await reload()
     }
 
     @ViewBuilder func keyActions(_ k: Record) -> some View {

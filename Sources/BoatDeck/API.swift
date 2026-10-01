@@ -19,25 +19,41 @@ struct BoatError: LocalizedError {
 
 /// Thin client over https://boat.dev/api/v1
 final class BoatAPI: @unchecked Sendable {
-    var baseURL: String
-    var apiKey: String
-    var org: String?
+    let baseURL: String
+    let apiKey: String
+    let org: String?
+    private let session: URLSession
 
-    init(baseURL: String, apiKey: String, org: String? = nil) {
+    init(baseURL: String, apiKey: String, org: String? = nil, session: URLSession? = nil) {
         self.baseURL = baseURL
         self.apiKey = apiKey
         self.org = org
-    }
-
-    private lazy var session: URLSession = {
-        let cfg = URLSessionConfiguration.default
+        let cfg = URLSessionConfiguration.ephemeral
         cfg.timeoutIntervalForRequest = 120
         cfg.timeoutIntervalForResource = 60 * 60 * 6
-        return URLSession(configuration: cfg)
-    }()
+        self.session = session ?? URLSession(configuration: cfg)
+    }
+
+    func cancel() { session.invalidateAndCancel() }
+
+    /// A single opaque path component; delimiters must never become routing syntax.
+    static func segment(_ value: String) -> String {
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~")
+        if value == "." || value == ".." { return value.replacingOccurrences(of: ".", with: "%2E") }
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? ""
+    }
 
     func makeRequest(_ method: String, _ path: String, query: [String: String?] = [:],
                      body: JSON? = nil, headers: [String: String] = [:]) throws -> URLRequest {
+        try Task.checkCancellation()
+        guard !apiKey.isEmpty else {
+            throw BoatError(status: 0, code: "no_api_key", message: "Add your Boat API key in Settings (⌘,).")
+        }
+        guard let base = URLComponents(string: baseURL), let host = base.host,
+              base.user == nil, base.password == nil, base.query == nil, base.fragment == nil,
+              base.scheme == "https" || (base.scheme == "http" && ["localhost", "127.0.0.1", "[::1]"].contains(host)) else {
+            throw BoatError(status: 0, code: "bad_url", message: "Use an HTTPS API URL (HTTP is allowed only on localhost).")
+        }
         let trimmed = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
         guard var comps = URLComponents(string: trimmed + path) else {
             throw BoatError(status: 0, code: nil, message: "Bad URL: \(path)")
@@ -49,7 +65,7 @@ final class BoatAPI: @unchecked Sendable {
         req.httpMethod = method
         req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Accept")
-        req.setValue("BoatDeck/1.0 (macOS)", forHTTPHeaderField: "User-Agent")
+        req.setValue("BoatDeck/2.0 (macOS)", forHTTPHeaderField: "User-Agent")
         if let org, !org.isEmpty { req.setValue(org, forHTTPHeaderField: "X-Boat-Org") }
         for (k, v) in headers { req.setValue(v, forHTTPHeaderField: k) }
         if let body {
@@ -129,7 +145,7 @@ final class BoatAPI: @unchecked Sendable {
 
     // MARK: - Convenience endpoints
 
-    func sb(_ id: String) -> String { "/sandboxes/\(id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id)" }
+    func sb(_ id: String) -> String { "/sandboxes/\(Self.segment(id))" }
 
     func me() async throws -> JSON { try await call("GET", "/me") }
     func limits() async throws -> JSON { try await call("GET", "/limits") }
@@ -192,26 +208,14 @@ final class BoatAPI: @unchecked Sendable {
         if let cwd, !cwd.isEmpty { b["cwd"] = .string(cwd) }
         return try await call("POST", sb(id) + "/commands", body: .object(b))
     }
-    func commandStatus(_ id: String, pid: String) async throws -> JSON { try await call("GET", sb(id) + "/commands/\(pid)") }
+    func commandStatus(_ id: String, pid: String) async throws -> JSON { try await call("GET", sb(id) + "/commands/\(Self.segment(pid))") }
 
     func readFile(_ id: String, path: String) async throws -> (Data, HTTPURLResponse) {
         try await raw("GET", sb(id) + "/files", query: ["path": path])
     }
     func writeFile(_ id: String, path: String, data: Data) async throws {
-        let b64 = data.base64EncodedString()
-        do {
-            try await call("PUT", sb(id) + "/files",
-                           body: ["path": .string(path), "contents": .string(b64), "content": .string(b64), "encoding": "base64"])
-        } catch {
-            // Fallback: write through exec (works for small/medium files).
-            guard data.count < 3_000_000 else { throw error }
-            let dir = (path as NSString).deletingLastPathComponent
-            let cmd = "mkdir -p \(shq(dir)) && printf '%s' \(shq(b64)) | base64 -d > \(shq(path))"
-            let r = try await exec(id, command: cmd, cwd: nil)
-            if let code = r.first("exitCode", "exit_code")?.int, code != 0 {
-                throw BoatError(status: 0, code: "write_failed", message: r["stderr"]?.string ?? "write failed")
-            }
-        }
+        try await call("PUT", sb(id) + "/files",
+                       body: ["path": .string(path), "content": .string(data.base64EncodedString()), "encoding": "base64"])
     }
     func artifacts(_ id: String) async throws -> (Data, HTTPURLResponse) { try await raw("GET", sb(id) + "/artifacts") }
     func desktop(_ id: String) async throws -> JSON { try await call("POST", sb(id) + "/desktop") }
@@ -235,46 +239,49 @@ final class BoatAPI: @unchecked Sendable {
     func saveNamedSnapshot(sandboxId: String, name: String) async throws -> JSON {
         try await call("POST", "/named-snapshots", body: ["sandboxId": .string(sandboxId), "name": .string(name)])
     }
-    func deleteNamedSnapshot(_ name: String) async throws -> JSON { try await call("DELETE", "/named-snapshots/\(name)") }
-    func deleteSnapshot(_ id: String) async throws -> JSON { try await call("DELETE", "/snapshots/\(id)") }
-    func snapshotTree(_ id: String) async throws -> JSON { try await call("GET", "/snapshots/\(id)/tree") }
+    func deleteNamedSnapshot(_ name: String) async throws -> JSON { try await call("DELETE", "/named-snapshots/\(Self.segment(name))") }
+    func deleteSnapshot(_ id: String) async throws -> JSON { try await call("DELETE", "/snapshots/\(Self.segment(id))") }
+    func snapshotTree(_ id: String) async throws -> JSON { try await call("GET", "/snapshots/\(Self.segment(id))/tree") }
 
     // Environments
     func environments() async throws -> [Record] { try await call("GET", "/environments").list("environments").map(Record.init) }
     func createEnvironment(name: String) async throws -> JSON { try await call("POST", "/environments", body: ["name": .string(name)]) }
-    func updateEnvironment(_ id: String, _ body: JSON) async throws -> JSON { try await call("PUT", "/environments/\(id)", body: body) }
-    func deleteEnvironment(_ id: String) async throws -> JSON { try await call("DELETE", "/environments/\(id)") }
+    func updateEnvironment(_ id: String, _ body: JSON) async throws -> JSON { try await call("PUT", "/environments/\(Self.segment(id))", body: body) }
+    func deleteEnvironment(_ id: String) async throws -> JSON { try await call("DELETE", "/environments/\(Self.segment(id))") }
     func setVar(_ env: String, key: String, value: String) async throws -> JSON {
-        try await call("PUT", "/environments/\(env)/vars/\(key)", body: ["value": .string(value)])
+        try await call("PUT", "/environments/\(Self.segment(env))/vars/\(Self.segment(key))", body: ["value": .string(value)])
     }
-    func removeVar(_ env: String, key: String) async throws -> JSON { try await call("DELETE", "/environments/\(env)/vars/\(key)") }
+    func removeVar(_ env: String, key: String) async throws -> JSON { try await call("DELETE", "/environments/\(Self.segment(env))/vars/\(Self.segment(key))") }
     func setSecretFile(_ env: String, path: String, contents: Data) async throws -> JSON {
-        try await call("PUT", "/environments/\(env)/secret-files",
-                       body: ["path": .string(path), "contents": .string(contents.base64EncodedString()), "encoding": "base64"])
+        guard let text = String(data: contents, encoding: .utf8) else {
+            throw BoatError(status: 0, code: "invalid_text", message: "Environment secret files must be UTF-8 text.")
+        }
+        return try await call("PUT", "/environments/\(Self.segment(env))/secret-files",
+                              body: ["path": .string(path), "contents": .string(text)])
     }
     func removeSecretFile(_ env: String, path: String) async throws -> JSON {
-        try await call("DELETE", "/environments/\(env)/secret-files", query: ["path": path], body: ["path": .string(path)])
+        try await call("DELETE", "/environments/\(Self.segment(env))/secret-files", query: ["path": path], body: ["path": .string(path)])
     }
     func addRepo(_ env: String, repositoryId: String, branch: String?) async throws -> JSON {
         var b: [String: JSON] = ["repositoryId": .string(repositoryId), "repo": .string(repositoryId)]
         if let n = Double(repositoryId) { b["repositoryId"] = .number(n) }
         if let branch, !branch.isEmpty { b["baseBranch"] = .string(branch) }
-        return try await call("POST", "/environments/\(env)/repos", body: .object(b))
+        return try await call("POST", "/environments/\(Self.segment(env))/repos", body: .object(b))
     }
-    func removeRepo(_ env: String, repoId: String) async throws -> JSON { try await call("DELETE", "/environments/\(env)/repos/\(repoId)") }
-    func upgradeEnvironment(_ env: String) async throws -> JSON { try await call("POST", "/environments/\(env)/upgrade") }
+    func removeRepo(_ env: String, repoId: String) async throws -> JSON { try await call("DELETE", "/environments/\(Self.segment(env))/repos/\(Self.segment(repoId))") }
+    func upgradeEnvironment(_ env: String) async throws -> JSON { try await call("POST", "/environments/\(Self.segment(env))/upgrade") }
     func repos() async throws -> [Record] { try await call("GET", "/repos").list("repos", "repositories").map(Record.init) }
 
     // Keys & webhooks
     func apiKeys() async throws -> [Record] { try await call("GET", "/api-keys").list("apiKeys", "keys").map(Record.init) }
-    func apiKeyUsage(_ id: String) async throws -> JSON { try await call("GET", "/api-keys/\(id)/usage") }
+    func apiKeyUsage(_ id: String) async throws -> JSON { try await call("GET", "/api-keys/\(Self.segment(id))/usage") }
     func webhooks() async throws -> [Record] { try await call("GET", "/webhooks").list("webhooks").map(Record.init) }
     func createWebhook(url: String, events: [String]) async throws -> JSON {
         try await call("POST", "/webhooks", body: ["url": .string(url), "events": .array(events.map { .string($0) })])
     }
-    func updateWebhook(_ id: String, _ body: JSON) async throws -> JSON { try await call("PATCH", "/webhooks/\(id)", body: body) }
-    func rotateWebhook(_ id: String) async throws -> JSON { try await call("POST", "/webhooks/\(id)/rotate") }
-    func deleteWebhook(_ id: String) async throws -> JSON { try await call("DELETE", "/webhooks/\(id)") }
+    func updateWebhook(_ id: String, _ body: JSON) async throws -> JSON { try await call("PATCH", "/webhooks/\(Self.segment(id))", body: body) }
+    func rotateWebhook(_ id: String) async throws -> JSON { try await call("POST", "/webhooks/\(Self.segment(id))/rotate") }
+    func deleteWebhook(_ id: String) async throws -> JSON { try await call("DELETE", "/webhooks/\(Self.segment(id))") }
 
     func dataRetention() async throws -> JSON { try await call("GET", "/account/data-retention") }
     func setDataRetention(_ zdr: Bool) async throws -> JSON {

@@ -278,7 +278,7 @@ struct SandboxQuickActions: View {
             Task {
                 let left = max(0, state.sandboxes.first { $0.id == id }?.archiveAfter?.timeIntervalSinceNow ?? 0)
                 let ttl = Int(left + 3600)
-                await state.runOrCLI("Extended by 1h", cli: ["extend", id, "--hours", "1"]) {
+                await state.runAction("Extended by 1h") {
                     try await $0.updateSandbox(id, ["ttlSeconds": .number(Double(ttl))])
                 }
                 await state.refreshSandboxes(silent: true)

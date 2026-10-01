@@ -144,9 +144,9 @@ final class AppState: ObservableObject {
     }
 
     private func rebuildAPI() {
-        api.baseURL = apiURL
-        api.apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        api.org = org.isEmpty ? nil : org
+        api.cancel()
+        api = BoatAPI(baseURL: apiURL, apiKey: apiKey.trimmingCharacters(in: .whitespacesAndNewlines),
+                      org: org.isEmpty ? nil : org)
     }
 
     var hasKey: Bool { !apiKey.trimmingCharacters(in: .whitespaces).isEmpty }
@@ -284,23 +284,10 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// Tries the REST API first; if that fails and the CLI is installed, runs the equivalent `boat` command.
+    /// A failed write is never retried with a different transport or credential.
     @discardableResult
-    func runOrCLI(_ label: String, cli: [String], _ op: @escaping (BoatAPI) async throws -> JSON) async -> Bool {
-        do {
-            _ = try await op(api)
-            toast(label)
-            return true
-        } catch {
-            guard let p = cliPath else {
-                toast("\(label) failed — \(error.localizedDescription)", error: true)
-                return false
-            }
-            let r = await BoatCLI.run(p, cli)
-            if r.exitCode == 0 { toast("\(label) (via CLI)"); return true }
-            toast("\(label) failed — \(error.localizedDescription) · CLI: \((r.stderr + r.stdout).prefix(200))", error: true)
-            return false
-        }
+    func runAction(_ label: String, _ op: @escaping (BoatAPI) async throws -> JSON) async -> Bool {
+        await run(label, refresh: false, op) != nil
     }
 
     /// Runs a boat CLI command and toasts the outcome.

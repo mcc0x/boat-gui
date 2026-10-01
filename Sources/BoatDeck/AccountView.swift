@@ -200,7 +200,7 @@ struct AccountView: View {
     func switchOrg(name: String, id: String) async {
         let body: JSON = .object(["org": .string(name), "orgId": .string(id)])
         let op: (BoatAPI) async throws -> JSON = { api in try await api.call("PATCH", "/orgs/active", body: body) }
-        await state.runOrCLI("Switched to \(name)", cli: ["org", "switch", name], op)
+        await state.runAction("Switched to \(name)", op)
         orgs = try? await state.api.orgs()
         await state.refreshAll()
     }

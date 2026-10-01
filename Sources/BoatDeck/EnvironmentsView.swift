@@ -70,7 +70,7 @@ struct EnvironmentsView: View {
 
     func create() {
         guard let n = promptText("New environment", "Name", ok: "Create") else { return }
-        Task { await state.runOrCLI("Environment created", cli: ["env", "new", n]) { try await $0.createEnvironment(name: n) }; await reload() }
+        Task { await state.runAction("Environment created") { try await $0.createEnvironment(name: n) }; await reload() }
     }
 
     func reload() async {
@@ -127,18 +127,18 @@ struct EnvironmentDetail: View {
                     if env.json["isDefault"]?.bool != true {
                         Button("Make default") { Task { await state.cli("Default set", ["env", "default", name]); await reload() } }.bdButton()
                     }
-                    Button { Task { await state.runOrCLI("Upgrade started", cli: ["env", "upgrade", name]) { try await $0.upgradeEnvironment(envId) } } } label: {
+                    Button { Task { await state.runAction("Upgrade started") { try await $0.upgradeEnvironment(envId) } } } label: {
                         Label("Upgrade sandboxes", systemImage: "arrow.up.circle")
                     }.bdButton()
                     Menu {
                         Button("Rename…") {
                             guard let n = promptText("Rename environment", default: name) else { return }
-                            Task { await state.runOrCLI("Renamed", cli: ["env", "rename", name, n]) { try await $0.updateEnvironment(envId, ["name": .string(n)]) }; await reload() }
+                            Task { await state.runAction("Renamed") { try await $0.updateEnvironment(envId, ["name": .string(n)]) }; await reload() }
                         }
                         Divider()
                         Button("Delete…", role: .destructive) {
                             guard confirm("Delete environment \(name)?", "Sandboxes already running are not affected.") else { return }
-                            Task { await state.runOrCLI("Environment deleted", cli: ["env", "rm", name]) { try await $0.deleteEnvironment(envId) }; await reload() }
+                            Task { await state.runAction("Environment deleted") { try await $0.deleteEnvironment(envId) }; await reload() }
                         }
                     } label: { Image(systemName: "ellipsis").frame(width: 28, height: 28) }
                     .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
@@ -167,7 +167,7 @@ struct EnvironmentDetail: View {
                             Text(reveal ? val : "••••••••").font(.bdMonoSmall).foregroundStyle(BD.text2)
                                 .textSelection(.enabled).lineLimit(1).frame(maxWidth: 360, alignment: .trailing)
                             IconButton(icon: "trash", size: 24) {
-                                Task { await state.runOrCLI("Removed \(k)", cli: ["env", "rm-var", name, k]) { try await $0.removeVar(envId, key: k) }; await reload() }
+                                Task { await state.runAction("Removed \(k)") { try await $0.removeVar(envId, key: k) }; await reload() }
                             }
                         }
                         .padding(.vertical, 6)
@@ -197,7 +197,7 @@ struct EnvironmentDetail: View {
                             Text(p).font(.bdMono).foregroundStyle(BD.text)
                             Spacer()
                             IconButton(icon: "trash", size: 24) {
-                                Task { await state.runOrCLI("Removed \(p)", cli: ["env", "rm-file", name, p]) { try await $0.removeSecretFile(envId, path: p) }; await reload() }
+                                Task { await state.runAction("Removed \(p)") { try await $0.removeSecretFile(envId, path: p) }; await reload() }
                             }
                         }
                     }
@@ -245,7 +245,7 @@ struct EnvironmentDetail: View {
                                 if let b = r.first("branch", "baseBranch")?.string { Chip(text: b, mono: true) }
                                 Spacer()
                                 IconButton(icon: "trash", size: 24) {
-                                    Task { await state.runOrCLI("Removed \(n)", cli: ["env", "rm-repo", name, n]) { try await $0.removeRepo(envId, repoId: rid) }; await reload() }
+                                    Task { await state.runAction("Removed \(n)") { try await $0.removeRepo(envId, repoId: rid) }; await reload() }
                                 }
                             }
                         }
@@ -299,7 +299,7 @@ struct EnvironmentDetail: View {
                     if cliFlag.isEmpty {
                         await state.run(msg, refresh: false) { try await $0.updateEnvironment(envId, .object(body)) }
                     } else {
-                        await state.runOrCLI(msg, cli: ["env", "set", name, cliFlag, v ? "true" : "false"]) {
+                        await state.runAction(msg) {
                             try await $0.updateEnvironment(envId, .object(body))
                         }
                     }
@@ -312,7 +312,7 @@ struct EnvironmentDetail: View {
 
     func setVar() async {
         let k = newKey, v = newValue
-        if await state.runOrCLI("Set \(k)", cli: ["env", "set-var", name, "\(k)=\(v)"], { try await $0.setVar(envId, key: k, value: v) }) {
+        if await state.runAction("Set \(k)", { try await $0.setVar(envId, key: k, value: v) }) {
             newKey = ""; newValue = ""
         }
         await reload()
@@ -324,7 +324,7 @@ struct EnvironmentDetail: View {
         guard panel.runModal() == .OK, let url = panel.url, let data = try? Data(contentsOf: url) else { return }
         guard let dest = promptText("Path inside the sandbox", default: url.lastPathComponent) else { return }
         Task {
-            await state.runOrCLI("Secret file added", cli: ["env", "set-file", name, dest, "--from", url.path]) {
+            await state.runAction("Secret file added") {
                 try await $0.setSecretFile(envId, path: dest, contents: data)
             }
             await reload()
@@ -335,10 +335,8 @@ struct EnvironmentDetail: View {
         let full = repoInput
         let match = availableRepos.first { ($0["fullName", "nameWithOwner", "name"] ?? $0.id) == full }
         let rid = match?["databaseId", "repositoryId", "id"] ?? full
-        var cli = ["env", "add-repo", name, full]
-        if !repoBranch.isEmpty { cli += ["--branch", repoBranch] }
         let branch = repoBranch
-        if await state.runOrCLI("Added \(full)", cli: cli, { try await $0.addRepo(envId, repositoryId: rid, branch: branch) }) {
+        if await state.runAction("Added \(full)", { try await $0.addRepo(envId, repositoryId: rid, branch: branch) }) {
             repoInput = ""; repoBranch = ""
         }
         await reload()

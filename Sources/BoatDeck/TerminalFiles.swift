@@ -115,7 +115,7 @@ struct TerminalView: View {
                     .onKeyPress(.upArrow) { recall(-1); return .handled }
                     .onKeyPress(.downArrow) { recall(1); return .handled }
                 if running {
-                    Button("Stop") { task?.cancel(); running = false; lines.append(TermLine(kind: .meta, text: "^C (stopped watching)")) }
+                    Button("Stop") { task?.cancel(); lines.append(TermLine(kind: .meta, text: "^C (stopped watching)")) }
                         .bdButton(.danger, .small)
                 } else {
                     Button { runIt() } label: {
@@ -149,6 +149,7 @@ struct TerminalView: View {
         .environment(\.colorScheme, .dark)
         .padding(.horizontal, gutter).padding(.top, 20).padding(.bottom, 24)
         .onAppear { focused = true }
+        .onDisappear { task?.cancel() }
     }
 
     func recall(_ dir: Int) {
@@ -181,7 +182,7 @@ struct TerminalView: View {
 
     func runIt() {
         let cmd = command.trimmingCharacters(in: .whitespaces)
-        guard !cmd.isEmpty else { return }
+        guard !cmd.isEmpty, !running else { return }
         if cmd == "clear" { lines.removeAll(); command = ""; return }
         pushHistory(cmd)
         command = ""
@@ -198,25 +199,22 @@ struct TerminalView: View {
                 case "sync":
                     append(try await state.api.exec(id, command: cmd, cwd: cwd, timeout: timeout))
                 default:
-                    var got = false
-                    do {
-                        for try await ev in state.api.execStream(id, command: cmd, cwd: cwd, timeout: timeout) {
-                            got = true
-                            switch ev["type"]?.string ?? "" {
-                            case "stdout": out(ev.first("data", "text")?.string ?? "")
-                            case "stderr": out(ev.first("data", "text")?.string ?? "", err: true)
-                            case "exit": exitLine(ev.first("exitCode", "code")?.int)
-                            case "started": break
-                            default:
-                                if ev["stdout"] != nil || ev["exitCode"] != nil { append(ev) } else { lines.append(TermLine(kind: .meta, text: ev.compact)) }
-                            }
+                    // A failed stream may already have executed the command. Never replay it.
+                    for try await ev in state.api.execStream(id, command: cmd, cwd: cwd, timeout: timeout) {
+                        switch ev["type"]?.string ?? "" {
+                        case "stdout": out(ev.first("data", "text")?.string ?? "")
+                        case "stderr": out(ev.first("data", "text")?.string ?? "", err: true)
+                        case "exit": exitLine(ev.first("exitCode", "code")?.int)
+                        case "started": break
+                        default:
+                            if ev["stdout"] != nil || ev["exitCode"] != nil { append(ev) } else { lines.append(TermLine(kind: .meta, text: ev.compact)) }
                         }
-                    } catch let streamErr where !got {
-                        _ = streamErr
-                        append(try await state.api.exec(id, command: cmd, cwd: cwd, timeout: timeout))
                     }
                 }
+            } catch is CancellationError {
+                // Stop watching never starts another command.
             } catch {
+                guard !Task.isCancelled else { return }
                 lines.append(TermLine(kind: .err, text: "error: \(error.localizedDescription)"))
             }
         }
