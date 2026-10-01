@@ -94,7 +94,8 @@ final class AppState: ObservableObject {
     @AppStorage("agent.effort") var agentEffort: String = ""
     @AppStorage("agent.expandTools") var expandTools: Bool = false
 
-    @Published var apiKey: String = "" { didSet { if oldValue != apiKey { Credentials.save(apiKey) }; rebuildAPI() } }
+    @Published private(set) var apiKey: String = ""
+    @Published private(set) var sessionID = UUID()
     @Published var section: NavSection = .home { didSet { if section != oldValue { AppearIn.pageOpened() } } }
     @Published var sandboxes: [Record] = []
     @Published var loadedOnce = false
@@ -119,23 +120,28 @@ final class AppState: ObservableObject {
     private var lastStates: [String: String] = [:]
 
     init() {
-        let key = Credentials.load() ?? ProcessInfo.processInfo.environment["BOAT_API_KEY"] ?? ""
+        var stored: String?
+        var storageError: String?
+        do { stored = try Credentials.load() }
+        catch { storageError = error.localizedDescription }
+        let key = storageError == nil ? (stored ?? ProcessInfo.processInfo.environment["BOAT_API_KEY"] ?? "") : ""
         api = BoatAPI(baseURL: UserDefaults.standard.string(forKey: "apiURL") ?? "https://boat.dev/api/v1",
                       apiKey: key, org: UserDefaults.standard.string(forKey: "org"))
         apiKey = key
         section = NavSection(rawValue: UserDefaults.standard.string(forKey: "defaultSection") ?? "") ?? .home
-        if let d = UserDefaults.standard.data(forKey: "activity"),
-           let a = try? JSONDecoder().decode([ActivityItem].self, from: d) { activity = a }
+        // Old activity was not scoped to an account. Keep activity in memory from now on.
+        UserDefaults.standard.removeObject(forKey: "activity")
         relocateCLI()
-        if key.isEmpty {
-            // One-time migration from the Keychain (v1 stored the key there). Off the main thread so a
-            // Keychain access prompt can never freeze the UI.
-            Task.detached {
-                guard let k = Keychain.get("apiKey"), !k.isEmpty else { return }
-                await MainActor.run { [weak self] in
-                    guard let self, self.apiKey.isEmpty else { return }
-                    self.apiKey = k
-                    Task { await self.refreshAll() }
+        if let storageError { toast("Cannot read saved credentials: \(storageError)", error: true) }
+        if stored == nil, key.isEmpty, storageError == nil {
+            let initialSession = sessionID
+            Task {
+                let legacyKey = await Task.detached { Keychain.get("apiKey") }.value
+                guard self.sessionID == initialSession, self.apiKey.isEmpty,
+                      let legacyKey, !legacyKey.isEmpty else { return }
+                if self.setAPIKey(legacyKey) {
+                    await self.removeLegacyKey()
+                    await self.refreshAll()
                 }
             }
         }
@@ -143,10 +149,43 @@ final class AppState: ObservableObject {
         startPolling()
     }
 
-    private func rebuildAPI() {
+    @discardableResult
+    func setAPIKey(_ value: String) -> Bool {
+        let key = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        do { try Credentials.save(key) }
+        catch { toast("Could not save credentials: \(error.localizedDescription)", error: true); return false }
+        apiKey = key
+        rebuildAPI(force: true)
+        return true
+    }
+
+    func signOut() async {
+        // Save the empty marker first; do not claim success if persistence fails.
+        guard setAPIKey("") else { return }
+        UserDefaults.standard.removeObject(forKey: "term.history")
+        UserDefaults.standard.removeObject(forKey: "term.cwd")
+        await removeLegacyKey()
+    }
+
+    private func removeLegacyKey() async {
+        let message = await Task.detached { () -> String? in
+            do { try Keychain.remove("apiKey"); return nil }
+            catch { return error.localizedDescription }
+        }.value
+        if let message { toast("Saved credential updated, but the old Keychain item could not be removed: \(message)", error: true) }
+    }
+
+    private func rebuildAPI(force: Bool = false) {
+        guard force || api.baseURL != apiURL || api.apiKey != apiKey || api.org != (org.isEmpty ? nil : org) else { return }
+        pollTask?.cancel()
         api.cancel()
-        api = BoatAPI(baseURL: apiURL, apiKey: apiKey.trimmingCharacters(in: .whitespacesAndNewlines),
-                      org: org.isEmpty ? nil : org)
+        api = BoatAPI(baseURL: apiURL, apiKey: apiKey, org: org.isEmpty ? nil : org)
+        sessionID = UUID()
+        sandboxes = []; environments = []; namedSnapshots = []
+        me = nil; limits = nil; catalog = [:]; efforts = [:]; activity = []; lastStates = [:]
+        loadedOnce = false; loading = false; lastError = nil; connection = .unknown
+        selectedSandbox = nil; showNewSandbox = false; showPalette = false; toasts = []
+        startPolling()
     }
 
     var hasKey: Bool { !apiKey.trimmingCharacters(in: .whitespaces).isEmpty }
@@ -179,34 +218,49 @@ final class AppState: ObservableObject {
 
     func refreshAll() async {
         guard hasKey else { return }
+        let client = api
+        let generation = sessionID
         if !loading { loading = true }
-        defer { if loading { loading = false } }
+        defer { if sessionID == generation, loading { loading = false } }
         await refreshSandboxes(silent: false)
-        async let e = try? api.environments()
-        async let n = try? api.namedSnapshots()
-        async let m = try? api.me()
-        async let l = try? api.limits()
-        if let ne = await e, ne != environments { environments = ne }
-        if let nn = await n, nn != namedSnapshots { namedSnapshots = nn }
-        if let nm = await m, nm != me { me = nm }
-        if let nl = await l, nl != limits { limits = nl }
+        guard sessionID == generation, !Task.isCancelled else { return }
+        async let e = try? client.environments()
+        async let n = try? client.namedSnapshots()
+        async let m = try? client.me()
+        async let l = try? client.limits()
+        let (ne, nn, nm, nl) = await (e, n, m, l)
+        guard sessionID == generation, !Task.isCancelled else { return }
+        if let ne, ne != environments { environments = ne }
+        if let nn, nn != namedSnapshots { namedSnapshots = nn }
+        if let nm, nm != me { me = nm }
+        if let nl, nl != limits { limits = nl }
         if catalog.isEmpty { await loadCatalog() }
     }
 
     func testConnection() async {
-        do { me = try await api.me(); connection = .ok }
-        catch { connection = .failed(error.localizedDescription) }
+        let client = api
+        do {
+            let result = try await client.me()
+            guard api === client, !Task.isCancelled else { return }
+            me = result; connection = .ok
+        } catch {
+            guard api === client, !Task.isCancelled else { return }
+            connection = .failed(error.localizedDescription)
+        }
     }
 
     func refreshSandboxes(silent: Bool) async {
+        let client = api
         do {
-            let list = try await api.sandboxes()
+            let list = try await client.sandboxes()
+            guard api === client, !Task.isCancelled else { return }
             detectChanges(list)
             if list != sandboxes { withAnimation(BD.spring) { sandboxes = list } }
             if !loadedOnce { loadedOnce = true }
             if connection != .ok { connection = .ok }
             if !silent, lastError != nil { lastError = nil }
         } catch {
+            guard api === client, !Task.isCancelled else { return }
             if !loadedOnce { loadedOnce = true }
             if !silent, lastError != error.localizedDescription { lastError = error.localizedDescription }
             if let e = error as? BoatError, e.status == 401 || e.status == 403 { connection = .failed(e.message) }
@@ -229,7 +283,6 @@ final class AppState: ObservableObject {
         }
         if changed {
             if activity.count > 200 { activity = Array(activity.prefix(200)) }
-            if let d = try? JSONEncoder().encode(activity) { UserDefaults.standard.set(d, forKey: "activity") }
         }
     }
 
@@ -261,12 +314,15 @@ final class AppState: ObservableObject {
     /// Runs an API action, reporting success/failure as a toast.
     @discardableResult
     func run(_ label: String, refresh: Bool = true, _ op: @escaping (BoatAPI) async throws -> JSON) async -> JSON? {
+        let client = api
         do {
-            let r = try await op(api)
+            let r = try await op(client)
+            guard api === client, !Task.isCancelled else { return nil }
             toast(label)
             if refresh { await refreshSandboxes(silent: true) }
             return r
         } catch {
+            guard api === client, !Task.isCancelled else { return nil }
             toast("\(label) failed — \(error.localizedDescription)", error: true)
             return nil
         }
@@ -307,7 +363,10 @@ final class AppState: ObservableObject {
     }
 
     func loadCatalog() async {
-        guard let j = try? await api.providerModels() else {
+        let client = api
+        let result = try? await client.providerModels()
+        guard api === client, !Task.isCancelled else { return }
+        guard let j = result else {
             if catalog.isEmpty { catalog = ["claude-code": [], "codex": []] }
             return
         }

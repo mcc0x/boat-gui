@@ -1,6 +1,7 @@
 import Foundation
 import Security
 import AppKit
+import Darwin
 
 // MARK: - Keychain
 
@@ -18,37 +19,46 @@ enum Keychain {
         return String(data: d, encoding: .utf8)
     }
 
-    static func set(_ account: String, _ value: String) {
-        let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
-                                   kSecAttrService as String: service,
-                                   kSecAttrAccount as String: account]
-        SecItemDelete(base as CFDictionary)
-        guard !value.isEmpty else { return }
-        var add = base
-        add[kSecValueData as String] = Data(value.utf8)
-        SecItemAdd(add as CFDictionary, nil)
+    static func remove(_ account: String) throws {
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                                   kSecAttrService as String: service, kSecAttrAccount as String: account]
+        let status = SecItemDelete(query as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw NSError(domain: NSOSStatusErrorDomain, code: Int(status))
+        }
     }
 }
 
 // MARK: - Credential file
 
-/// API key stored at ~/Library/Application Support/BoatDeck/credentials (mode 0600), like most CLIs do.
-/// Unlike an ad-hoc-signed app's Keychain item, this never triggers an access prompt after rebuilds.
+/// An empty file is a sign-out marker: legacy Keychain/env credentials must not restore the session.
 enum Credentials {
     static var url: URL {
-        let d = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/BoatDeck")
-        try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        return d.appendingPathComponent("credentials")
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/BoatDeck/credentials")
     }
-    static func load() -> String? {
-        guard let s = try? String(contentsOf: url, encoding: .utf8) else { return nil }
-        let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
-        return t.isEmpty ? nil : t
+    static func load(from file: URL = url) throws -> String? {
+        guard FileManager.default.fileExists(atPath: file.path) else { return nil }
+        return try String(contentsOf: file, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
     }
-    static func save(_ key: String) {
-        if key.isEmpty { try? FileManager.default.removeItem(at: url); return }
-        try? key.write(to: url, atomically: true, encoding: .utf8)
-        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    static func save(_ key: String, to file: URL = url) throws {
+        let fm = FileManager.default
+        let directory = file.deletingLastPathComponent()
+        try fm.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        try fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+        let temporary = directory.appendingPathComponent(".credentials-" + UUID().uuidString)
+        let fd = Darwin.open(temporary.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
+        guard fd >= 0 else { throw POSIXError(.EIO) }
+        defer { Darwin.close(fd); try? fm.removeItem(at: temporary) }
+        try Data(key.utf8).withUnsafeBytes { bytes in
+            var offset = 0
+            while offset < bytes.count {
+                let count = Darwin.write(fd, bytes.baseAddress!.advanced(by: offset), bytes.count - offset)
+                if count < 0 && errno == EINTR { continue }
+                guard count > 0 else { throw POSIXError(.EIO) }
+                offset += count
+            }
+        }
+        guard fsync(fd) == 0, rename(temporary.path, file.path) == 0 else { throw POSIXError(.EIO) }
     }
 }
 

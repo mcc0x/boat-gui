@@ -32,7 +32,8 @@ struct RootView: View {
         .overlay(alignment: .bottomTrailing) { ToastOverlay() }
         .animation(BD.spring, value: state.hasKey)
         .animation(BD.snappy, value: state.showPalette)
-        .task { await state.refreshAll() }
+        .id(state.sessionID)
+        .task(id: state.sessionID) { await state.refreshAll() }
         .sheet(isPresented: $state.showNewSandbox) {
             NewSandboxSheet().environmentObject(state).environmentObject(prefs)
         }

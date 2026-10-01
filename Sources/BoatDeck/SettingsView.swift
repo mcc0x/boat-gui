@@ -183,7 +183,7 @@ struct AccountPane: View {
             SettingsRow(title: "Replace key", icon: "arrow.triangle.2.circlepath", last: true) {
                 HStack {
                     Field(placeholder: "boat_…", text: $key, mono: true, secure: true).frame(width: 180)
-                    Button("Save") { state.apiKey = key.trimmingCharacters(in: .whitespacesAndNewlines); key = ""; Task { await state.refreshAll(); await state.testConnection() } }
+                    Button("Save") { if state.setAPIKey(key) { key = ""; Task { await state.refreshAll(); await state.testConnection() } } }
                         .bdButton(.primary, .small).disabled(key.isEmpty)
                 }
             }
@@ -199,7 +199,7 @@ struct AccountPane: View {
         SettingsGroup {
             SettingsRow(title: "Sign out", sub: "Removes the saved API key from this Mac.", icon: "rectangle.portrait.and.arrow.right", last: true) {
                 Button("Sign out") {
-                    if confirm("Sign out?", "Your saved API key will be removed from this Mac.", destructive: "Sign out") { state.apiKey = "" }
+                    if confirm("Sign out?", "Your saved API key will be removed from this Mac.", destructive: "Sign out") { Task { await state.signOut() } }
                 }
                 .bdButton(.danger, .small)
             }

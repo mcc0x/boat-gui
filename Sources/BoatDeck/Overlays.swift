@@ -178,7 +178,7 @@ struct OnboardingView: View {
                     Eyebrow(text: "Connect with an API key")
                     HStack {
                         Field(placeholder: "boat_…", text: $key, mono: true, secure: true)
-                        Button("Connect") { state.apiKey = key.trimmingCharacters(in: .whitespacesAndNewlines); Task { await state.refreshAll() } }
+                        Button("Connect") { if state.setAPIKey(key) { key = ""; Task { await state.refreshAll() } } }
                             .bdButton(.primary).keyboardShortcut(.defaultAction).disabled(key.isEmpty)
                     }
                     HStack {
@@ -232,7 +232,7 @@ struct OnboardingView: View {
             ?? j?["apiKey"]?.first("key", "secret", "token")?.string
             ?? j?["key"]?.first("secret", "key", "token")?.string
         if let secret, r.exitCode == 0 {
-            withAnimation(BD.spring) { state.apiKey = secret }
+            guard state.setAPIKey(secret) else { return }
             await state.refreshAll()
         } else {
             msg = "Couldn't read a key from the CLI (exit \(r.exitCode)). Run “Log in” first, then retry — or paste a key above.\n\(stripANSI(r.stderr + r.stdout).prefix(300))"
