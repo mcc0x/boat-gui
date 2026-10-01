@@ -6,46 +6,88 @@ struct EnvironmentsView: View {
     @VState private var error: String?
 
     var body: some View {
-        HSplitView {
-            List(state.environments, selection: $selected) { e in
+        HStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 14) {
                 HStack {
-                    Image(systemName: "leaf.fill").foregroundStyle(.green)
-                    VStack(alignment: .leading) {
-                        Text(e.displayName).font(.body.weight(.medium))
-                        Text("v\(e["version"] ?? "?") · \(e.json["vars"]?.array?.count ?? 0) vars · \(e.json["repos"]?.array?.count ?? 0) repos")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
+                    Text("Environments").font(.bdTitle).foregroundStyle(BD.text)
                     Spacer()
-                    if e.json["isDefault"]?.bool == true { Text("default").font(.caption2).padding(3).background(.tint.opacity(0.2), in: Capsule()) }
+                    IconButton(icon: "plus", help: "New environment") { create() }
                 }
-                .tag(e.id)
+                Text("Repos, variables, secret files and credentials sandboxes boot with.")
+                    .font(.bdBody).foregroundStyle(BD.text2)
+                ScrollView {
+                    VStack(spacing: 6) {
+                        if state.environments.isEmpty {
+                            if let error { Text(error).font(.bdSmall).foregroundStyle(BD.red) }
+                            else { ForEach(0..<3, id: \.self) { _ in SkeletonRow() } }
+                        }
+                        ForEach(Array(state.environments.enumerated()), id: \.element.id) { i, e in
+                            EnvRow(env: e, selected: selected == e.id)
+                                .onTapGesture { withAnimation(BD.spring) { selected = e.id } }
+                                .appear(delay: 0.03 * Double(i))
+                        }
+                    }
+                }
+                .scrollContentBackground(.hidden)
             }
-            .frame(minWidth: 240, idealWidth: 280, maxWidth: 360)
-            .overlay { if state.environments.isEmpty { EmptyStateView(icon: "leaf", title: "No environments", message: error ?? "") } }
+            .padding(.horizontal, 20).padding(.top, 40).padding(.bottom, 20)
+            .frame(width: 320)
+            Rectangle().fill(BD.stroke).frame(width: 1)
 
             Group {
                 if let s = selected, let env = state.environments.first(where: { $0.id == s }) {
-                    EnvironmentDetail(env: env, reload: reload).id(env.id + (env["version"] ?? ""))
+                    EnvironmentDetail(env: env, reload: reload)
+                        .id(env.id)
+                        .transition(.opacity.combined(with: .offset(x: 12)))
                 } else {
                     EmptyStateView(icon: "leaf", title: "Select an environment",
-                                   message: "Environments bundle repos, env vars, secret files and credentials that sandboxes boot with.")
+                                   message: "Each sandbox boots with an environment: GitHub repos cloned, variables exported, secret files written.",
+                                   actionTitle: state.environments.isEmpty ? "Create environment" : nil) { create() }
                 }
             }
-            .frame(minWidth: 500, maxWidth: .infinity, maxHeight: .infinity)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .navigationTitle("Environments")
-        .toolbar {
-            Button { Task { await reload() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }
-            Button {
-                guard let n = promptText("New environment", "Name", ok: "Create") else { return }
-                Task { await state.runOrCLI("Environment created", cli: ["env", "new", n]) { try await $0.createEnvironment(name: n) }; await reload() }
-            } label: { Label("New Environment", systemImage: "plus") }
+        .animation(BD.spring, value: selected)
+        .task {
+            await reload()
+            if selected == nil { selected = state.environments.first(where: { $0.json["isDefault"]?.bool == true })?.id ?? state.environments.first?.id }
         }
-        .task { await reload() }
+    }
+
+    func create() {
+        guard let n = promptText("New environment", "Name", ok: "Create") else { return }
+        Task { await state.runOrCLI("Environment created", cli: ["env", "new", n]) { try await $0.createEnvironment(name: n) }; await reload() }
     }
 
     func reload() async {
-        do { state.environments = try await state.api.environments(); error = nil } catch { self.error = error.localizedDescription }
+        do { let e = try await state.api.environments(); withAnimation(BD.spring) { state.environments = e }; error = nil }
+        catch { self.error = error.localizedDescription }
+    }
+}
+
+struct EnvRow: View {
+    let env: Record
+    let selected: Bool
+    @VState private var hover = false
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "leaf.fill").font(.system(size: 13)).foregroundStyle(BD.text)
+                .frame(width: 32, height: 32).background(BD.surfaceHi, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(env.displayName).font(.system(size: 13, weight: .semibold)).foregroundStyle(BD.text)
+                    if env.json["isDefault"]?.bool == true { Chip(text: "default") }
+                }
+                Text("v\(env["version"] ?? "1") · \(env.json["vars"]?.array?.count ?? 0) vars · \(env.json["repos"]?.array?.count ?? 0) repos")
+                    .font(.bdSmall).foregroundStyle(BD.text3)
+            }
+            Spacer()
+        }
+        .padding(10)
+        .background(selected ? BD.surfaceHi : hover ? BD.surface : .clear, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(selected ? BD.stroke : .clear, lineWidth: 1))
+        .contentShape(Rectangle())
+        .onHover { hover = $0 }
     }
 }
 
@@ -65,122 +107,158 @@ struct EnvironmentDetail: View {
     var flags: JSON { env.json["flags"] ?? .null }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack {
-                    Text(name).font(.title2.bold())
-                    if env.json["isDefault"]?.bool == true { StateBadge(state: "default") }
-                    Spacer()
-                    Button("Make default") { Task { await state.cli("Default set", ["env", "default", name]); await reload() } }
-                    Button("Rename…") {
-                        guard let n = promptText("Rename environment", default: name) else { return }
-                        Task { await state.runOrCLI("Renamed", cli: ["env", "rename", name, n]) { try await $0.updateEnvironment(envId, ["name": .string(n)]) }; await reload() }
+        Page {
+            PageHeader(title: name, subtitle: "Version \(env["version"] ?? "1")\(env.json["isDefault"]?.bool == true ? " · default environment" : "")") {
+                HStack(spacing: 8) {
+                    if env.json["isDefault"]?.bool != true {
+                        Button("Make default") { Task { await state.cli("Default set", ["env", "default", name]); await reload() } }.bdButton()
                     }
-                    Button("Upgrade sandboxes") {
-                        Task { await state.runOrCLI("Upgrade started", cli: ["env", "upgrade", name]) { try await $0.upgradeEnvironment(envId) } }
-                    }
-                    Button("Delete…", role: .destructive) {
-                        guard confirm("Delete environment \(name)?", "Sandboxes already running are not affected.") else { return }
-                        Task { await state.runOrCLI("Environment deleted", cli: ["env", "rm", name]) { try await $0.deleteEnvironment(envId) }; await reload() }
-                    }
+                    Button { Task { await state.runOrCLI("Upgrade started", cli: ["env", "upgrade", name]) { try await $0.upgradeEnvironment(envId) } } } label: {
+                        Label("Upgrade sandboxes", systemImage: "arrow.up.circle")
+                    }.bdButton()
+                    Menu {
+                        Button("Rename…") {
+                            guard let n = promptText("Rename environment", default: name) else { return }
+                            Task { await state.runOrCLI("Renamed", cli: ["env", "rename", name, n]) { try await $0.updateEnvironment(envId, ["name": .string(n)]) }; await reload() }
+                        }
+                        Divider()
+                        Button("Delete…", role: .destructive) {
+                            guard confirm("Delete environment \(name)?", "Sandboxes already running are not affected.") else { return }
+                            Task { await state.runOrCLI("Environment deleted", cli: ["env", "rm", name]) { try await $0.deleteEnvironment(envId) }; await reload() }
+                        }
+                    } label: { Image(systemName: "ellipsis").frame(width: 28, height: 28) }
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                    .background(BD.surface, in: Circle()).overlay(Circle().strokeBorder(BD.stroke, lineWidth: 1))
                 }
-                GroupBox("Access flags") {
-                    VStack(alignment: .leading) {
-                        flagToggle("GitHub access", key: "github", cliFlag: "--github")
-                        flagToggle("Account secrets", key: "secrets", cliFlag: "--secrets")
-                        flagToggle("Safe for third parties", key: "safeForThirdParties", cliFlag: "--safe-for-third-parties", topLevel: true)
+            }
+            .appear()
+
+            HStack(alignment: .top, spacing: 14) {
+                section("Access", "lock.shield") {
+                    VStack(spacing: 10) {
+                        flagToggle("GitHub access", "Clone private repos", key: "github", cliFlag: "--github")
+                        Hairline()
+                        flagToggle("Account secrets", "Expose your saved secrets", key: "secrets", cliFlag: "--secrets")
+                        Hairline()
+                        flagToggle("Safe for third parties", "Allow sharing with collaborators", key: "safeForThirdParties", cliFlag: "--safe-for-third-parties", topLevel: true)
                         ForEach((flags.object ?? [:]).keys.sorted().filter { !["github", "secrets"].contains($0) }, id: \.self) { k in
-                            HStack { Text(k).foregroundStyle(.secondary); Spacer(); Text(flags[k]?.string ?? "—") }
+                            Hairline()
+                            KVRow(key: k, value: flags[k]?.string)
                         }
-                    }.padding(6)
+                    }
                 }
-                GroupBox {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(env.json["vars"]?.array ?? [], id: \.self) { v in
-                            let k = v.first("key", "name")?.string ?? v.string ?? "?"
-                            HStack {
-                                Text(k).font(.system(.body, design: .monospaced))
-                                Spacer()
-                                Text(reveal ? (v["value"]?.string ?? "•••") : "••••••").foregroundStyle(.secondary).textSelection(.enabled)
-                                Button { Task { await state.runOrCLI("Removed \(k)", cli: ["env", "rm-var", name, k]) { try await $0.removeVar(envId, key: k) }; await reload() } } label: {
-                                    Image(systemName: "trash")
-                                }.buttonStyle(.borderless)
-                            }
-                        }
-                        HStack {
-                            TextField("KEY", text: $newKey).font(.system(.body, design: .monospaced)).frame(width: 180)
-                            SecureField("value", text: $newValue)
-                            Button("Set") {
-                                let k = newKey, v = newValue
-                                Task {
-                                    if await state.runOrCLI("Set \(k)", cli: ["env", "set-var", name, "\(k)=\(v)"], { try await $0.setVar(envId, key: k, value: v) }) {
-                                        newKey = ""; newValue = ""
-                                    }
-                                    await reload()
-                                }
-                            }.disabled(newKey.isEmpty)
-                        }
-                    }.padding(6)
-                } label: {
-                    HStack { Text("Variables"); Spacer(); Toggle("Reveal", isOn: $reveal).toggleStyle(.checkbox).controlSize(.small) }
-                }
-                GroupBox("Secret files") {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(env.json.first("secretFiles", "files")?.array ?? [], id: \.self) { f in
-                            let p = f.first("path")?.string ?? f.string ?? "?"
-                            HStack {
-                                Image(systemName: "lock.doc")
-                                Text(p).font(.system(.body, design: .monospaced))
-                                Spacer()
-                                Button { Task { await state.runOrCLI("Removed \(p)", cli: ["env", "rm-file", name, p]) { try await $0.removeSecretFile(envId, path: p) }; await reload() } } label: {
-                                    Image(systemName: "trash")
-                                }.buttonStyle(.borderless)
-                            }
-                        }
-                        Button("Add secret file from Mac…") { addSecretFile() }
-                    }.padding(6)
-                }
-                GroupBox("Repositories") {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(env.json["repos"]?.array ?? [], id: \.self) { r in
+                section("Repositories", "chevron.left.forwardslash.chevron.right") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        let repos = env.json["repos"]?.array ?? []
+                        if repos.isEmpty { Text("No repositories yet.").font(.bdSmall).foregroundStyle(BD.text3) }
+                        ForEach(repos, id: \.self) { r in
                             let n = r.first("name", "fullName", "repo")?.string ?? r.compact
                             let rid = r.first("id", "repositoryId", "databaseId")?.string ?? n
                             HStack {
-                                Image(systemName: "chevron.left.forwardslash.chevron.right")
-                                Text(n)
-                                if let b = r.first("branch", "baseBranch")?.string { Text("@\(b)").foregroundStyle(.secondary) }
+                                Image(systemName: "arrow.triangle.branch").foregroundStyle(BD.text3)
+                                Text(n).font(.system(size: 12.5, weight: .medium)).foregroundStyle(BD.text)
+                                if let b = r.first("branch", "baseBranch")?.string { Chip(text: b, mono: true) }
                                 Spacer()
-                                Button { Task { await state.runOrCLI("Removed \(n)", cli: ["env", "rm-repo", name, n]) { try await $0.removeRepo(envId, repoId: rid) }; await reload() } } label: {
-                                    Image(systemName: "trash")
-                                }.buttonStyle(.borderless)
+                                IconButton(icon: "trash", size: 24) {
+                                    Task { await state.runOrCLI("Removed \(n)", cli: ["env", "rm-repo", name, n]) { try await $0.removeRepo(envId, repoId: rid) }; await reload() }
+                                }
                             }
                         }
                         HStack {
                             if availableRepos.isEmpty {
-                                TextField("owner/repo", text: $repoInput)
+                                Field(placeholder: "owner/repo", text: $repoInput, mono: true)
                             } else {
-                                Picker("Repo", selection: $repoInput) {
-                                    Text("Choose…").tag("")
+                                Picker("", selection: $repoInput) {
+                                    Text("Choose a repository…").tag("")
                                     ForEach(availableRepos) { r in
-                                        Text(r["fullName", "nameWithOwner", "name"] ?? r.id).tag(r["fullName", "nameWithOwner", "name"] ?? r.id)
+                                        let n = r["fullName", "nameWithOwner", "name"] ?? r.id
+                                        Text(n).tag(n)
                                     }
                                 }
+                                .labelsHidden()
                             }
-                            TextField("branch (optional)", text: $repoBranch).frame(width: 150)
-                            Button("Add") { Task { await addRepo() } }.disabled(repoInput.isEmpty)
+                            Field(placeholder: "branch", text: $repoBranch, mono: true).frame(width: 100)
+                            Button("Add") { Task { await addRepo() } }.bdButton(.primary, .small).disabled(repoInput.isEmpty)
                         }
-                    }.padding(6)
+                    }
                 }
-                GroupBox("All fields") { JSONGrid(json: env.json).frame(maxWidth: .infinity, alignment: .leading).padding(6) }
             }
-            .padding()
+            .appear(delay: 0.05)
+
+            section("Variables", "dollarsign.square", trailing: AnyView(
+                Toggle("Reveal values", isOn: $reveal.animation(BD.soft)).toggleStyle(.switch).controlSize(.mini).font(.bdSmall)
+            )) {
+                VStack(spacing: 0) {
+                    ForEach(env.json["vars"]?.array ?? [], id: \.self) { v in
+                        let k = v.first("key", "name")?.string ?? v.string ?? "?"
+                        HStack {
+                            Text(k).font(.bdMono).foregroundStyle(BD.text)
+                            Spacer()
+                            Text(reveal ? (v["value"]?.string ?? "•••") : "••••••••").font(.bdMonoSmall).foregroundStyle(BD.text2)
+                                .textSelection(.enabled).lineLimit(1).frame(maxWidth: 360, alignment: .trailing)
+                            IconButton(icon: "trash", size: 24) {
+                                Task { await state.runOrCLI("Removed \(k)", cli: ["env", "rm-var", name, k]) { try await $0.removeVar(envId, key: k) }; await reload() }
+                            }
+                        }
+                        .padding(.vertical, 6)
+                        Hairline()
+                    }
+                    HStack {
+                        Field(placeholder: "KEY", text: $newKey, mono: true).frame(width: 220)
+                        Field(placeholder: "value", text: $newValue, secure: true)
+                        Button { Task { await setVar() } } label: { Label("Set", systemImage: "plus") }
+                            .bdButton(.primary, .small).disabled(newKey.isEmpty)
+                    }
+                    .padding(.top, 10)
+                }
+            }
+            .appear(delay: 0.1)
+
+            section("Secret files", "lock.doc") {
+                VStack(alignment: .leading, spacing: 8) {
+                    let files = env.json.first("secretFiles", "files")?.array ?? []
+                    if files.isEmpty { Text("No secret files. Add a .env, credentials.json, SSH key…").font(.bdSmall).foregroundStyle(BD.text3) }
+                    ForEach(files, id: \.self) { f in
+                        let p = f.first("path")?.string ?? f.string ?? "?"
+                        HStack {
+                            Image(systemName: "lock.fill").font(.system(size: 11)).foregroundStyle(BD.text3)
+                            Text(p).font(.bdMono).foregroundStyle(BD.text)
+                            Spacer()
+                            IconButton(icon: "trash", size: 24) {
+                                Task { await state.runOrCLI("Removed \(p)", cli: ["env", "rm-file", name, p]) { try await $0.removeSecretFile(envId, path: p) }; await reload() }
+                            }
+                        }
+                    }
+                    Button { addSecretFile() } label: { Label("Add secret file from Mac…", systemImage: "plus") }.bdButton(.secondary, .small)
+                }
+            }
+            .appear(delay: 0.14)
+
+            DisclosureGroup {
+                JSONGrid(json: env.json).padding(.top, 8)
+            } label: { Eyebrow(text: "All fields") }
+            .glassCard()
         }
         .task { availableRepos = (try? await state.api.repos()) ?? [] }
     }
 
-    func flagToggle(_ label: String, key: String, cliFlag: String, topLevel: Bool = false) -> some View {
+    func section<C: View>(_ title: String, _ icon: String, trailing: AnyView? = nil, @ViewBuilder _ c: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: icon).font(.system(size: 12)).foregroundStyle(BD.text2)
+                Text(title).font(.bdH3).foregroundStyle(BD.text)
+                Spacer()
+                if let trailing { trailing }
+            }
+            c()
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .glassCard()
+    }
+
+    func flagToggle(_ label: String, _ sub: String, key: String, cliFlag: String, topLevel: Bool = false) -> some View {
         let current = (topLevel ? env.json[key] : flags[key])?.bool ?? false
-        return Toggle(label, isOn: Binding(get: { current }, set: { v in
+        return Toggle(isOn: Binding(get: { current }, set: { v in
             Task {
                 var body: [String: JSON] = [:]
                 if topLevel { body[key] = .bool(v) } else { body["flags"] = .object([key: .bool(v)]) }
@@ -189,7 +267,21 @@ struct EnvironmentDetail: View {
                 }
                 await reload()
             }
-        }))
+        })) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(label).font(.system(size: 12.5, weight: .medium)).foregroundStyle(BD.text)
+                Text(sub).font(.bdSmall).foregroundStyle(BD.text3)
+            }
+        }
+        .toggleStyle(.switch)
+    }
+
+    func setVar() async {
+        let k = newKey, v = newValue
+        if await state.runOrCLI("Set \(k)", cli: ["env", "set-var", name, "\(k)=\(v)"], { try await $0.setVar(envId, key: k, value: v) }) {
+            newKey = ""; newValue = ""
+        }
+        await reload()
     }
 
     func addSecretFile() {

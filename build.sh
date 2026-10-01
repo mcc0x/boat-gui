@@ -29,6 +29,8 @@ xattr -cr "$APP" 2>/dev/null || true
 codesign --force --deep --sign - "$APP" || echo "(signing skipped)"
 
 mkdir -p "$HOME/Applications"
+osascript -e 'quit app id "dev.boat.BoatDeck"' 2>/dev/null || true
+sleep 1; pkill -x BoatDeck 2>/dev/null || true
 rm -rf "$HOME/Applications/Boat Deck.app"
 cp -R "$APP" "$HOME/Applications/"
 echo "✓ Installed to ~/Applications/Boat Deck.app"

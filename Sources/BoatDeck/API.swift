@@ -64,6 +64,7 @@ final class BoatAPI: @unchecked Sendable {
         let (data, resp) = try await session.data(for: req)
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
         let json = JSON.parse(data)
+        Trace.log(method, req.url?.absoluteString ?? path, status, json, data)
         if status >= 400 || json?["ok"]?.bool == false {
             throw BoatError(status: status,
                             code: json?["code"]?.string,
@@ -275,3 +276,38 @@ final class BoatAPI: @unchecked Sendable {
 
 /// Shell single-quote.
 func shq(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }
+
+/// Optional developer trace of API traffic (secrets redacted). Enabled in Settings › Advanced.
+enum Trace {
+    static var enabled: Bool {
+        UserDefaults.standard.bool(forKey: "debugTrace")
+            || FileManager.default.fileExists(atPath: dir.appendingPathComponent(".trace").path)
+    }
+    static var dir: URL { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Documents/BoatDeck") }
+    static let sensitive: Set<String> = ["value", "secret", "token", "signingSecret", "contents", "content",
+                                         "apiKey", "password", "privateKey", "url_token", "key_secret"]
+
+    static func redact(_ j: JSON) -> JSON {
+        switch j {
+        case .object(let o):
+            var out: [String: JSON] = [:]
+            for (k, v) in o {
+                if sensitive.contains(k), case .string(let s) = v { out[k] = .string("‹redacted \(s.count)›") }
+                else if k.lowercased().hasSuffix("url"), case .string(let s) = v, s.contains("token") { out[k] = .string("‹redacted url›") }
+                else { out[k] = redact(v) }
+            }
+            return .object(out)
+        case .array(let a): return .array(a.map(redact))
+        default: return j
+        }
+    }
+
+    static func log(_ method: String, _ url: String, _ status: Int, _ json: JSON?, _ data: Data) {
+        guard enabled else { return }
+        let body = json.map { redact($0).pretty } ?? "‹\(data.count) bytes non-JSON›"
+        let line = "\n### \(Date()) \(method) \(url) → \(status)\n\(body.prefix(20000))\n"
+        let f = dir.appendingPathComponent("api-trace.log")
+        if let h = try? FileHandle(forWritingTo: f) { h.seekToEndOfFile(); h.write(Data(line.utf8)); try? h.close() }
+        else { try? line.write(to: f, atomically: true, encoding: .utf8) }
+    }
+}

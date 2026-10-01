@@ -1,0 +1,278 @@
+import SwiftUI
+import Charts
+
+struct AccountView: View {
+    @EnvironmentObject var state: AppState
+    @VState private var orgs: JSON?
+    @VState private var retention: JSON?
+
+    var body: some View {
+        Page {
+            PageHeader(title: "Account", subtitle: "Balance, limits, organizations and privacy.") {
+                HStack {
+                    Link(destination: URL(string: "https://boat.dev/pricing")!) { Label("Plans & pricing", systemImage: "arrow.up.right") }
+                        .buttonStyle(BDButtonStyle())
+                    IconButton(icon: "arrow.clockwise", help: "Refresh") { Task { await load() } }
+                }
+            }
+            .appear()
+
+            HStack(alignment: .top, spacing: 14) {
+                profileCard.appear(delay: 0.03)
+                balanceCard.appear(delay: 0.06)
+            }
+
+            if let starts = state.limits?["starts"]?.object, !starts.isEmpty { limitsCard(starts).appear(delay: 0.09) }
+
+            orgsCard.appear(delay: 0.12)
+
+            VStack(alignment: .leading, spacing: 10) {
+                Eyebrow(text: "Privacy")
+                let on = retention?.first("enabled", "zeroDataRetention")?.bool ?? false
+                Toggle(isOn: Binding(get: { on }, set: { v in
+                    Task { await state.run("Data retention updated", refresh: false) { try await $0.setDataRetention(v) }; retention = try? await state.api.dataRetention() }
+                })) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Zero data retention").font(.system(size: 13, weight: .medium)).foregroundStyle(BD.text)
+                        Text("Don't keep prompts, transcripts or outputs after a sandbox is deleted.").font(.bdSmall).foregroundStyle(BD.text3)
+                    }
+                }
+                .toggleStyle(.switch)
+            }
+            .glassCard()
+            .appear(delay: 0.15)
+        }
+        .task { await load() }
+    }
+
+    var profileCard: some View {
+        let u = state.me?["user"] ?? state.me ?? .null
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 14) {
+                Avatar(name: state.userName, size: 52)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(u.first("name", "login")?.string ?? state.userName).font(.bdH2).foregroundStyle(BD.text)
+                    Text(u.first("email")?.string ?? "").font(.bdBody).foregroundStyle(BD.text2)
+                }
+            }
+            Hairline()
+            JSONGrid(json: u, skip: ["ok", "type", "name"])
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .glassCard()
+    }
+
+    var balanceCard: some View {
+        let hours = state.creditHours
+        let conc = state.limits?["concurrency"]
+        let running = conc?["running"]?.double ?? Double(state.runningCount)
+        let limit = conc?["limit"]?.double ?? 0
+        return VStack(alignment: .leading, spacing: 16) {
+            Eyebrow(text: "Balance")
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(hours.map { String(format: "%.1f", $0) } ?? "—").font(.system(size: 44, weight: .semibold, design: .rounded)).foregroundStyle(BD.text)
+                    .contentTransition(.numericText())
+                Text("hours of compute").font(.bdBody).foregroundStyle(BD.text2)
+            }
+            HStack(spacing: 18) {
+                if let d = state.limits?.first("packBalanceDollars")?.double {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(String(format: "$%.2f", d)).font(.system(size: 16, weight: .semibold).monospacedDigit()).foregroundStyle(BD.text)
+                        Text("credit packs").font(.bdSmall).foregroundStyle(BD.text3)
+                    }
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(state.limits?["canStart"]?.bool == false ? "Blocked" : "Yes").font(.system(size: 16, weight: .semibold)).foregroundStyle(state.limits?["canStart"]?.bool == false ? BD.red : BD.text)
+                    Text("can start").font(.bdSmall).foregroundStyle(BD.text3)
+                }
+                Spacer()
+                if limit > 0 {
+                    RingGauge(value: running / limit, lineWidth: 7, color: BD.green).frame(width: 60, height: 60)
+                        .overlay(VStack(spacing: 0) {
+                            Text("\(Int(running))").font(.system(size: 14, weight: .semibold).monospacedDigit()).foregroundStyle(BD.text)
+                            Text("/\(Int(limit))").font(.system(size: 9)).foregroundStyle(BD.text3)
+                        })
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .glassCard()
+    }
+
+    struct Bar: Identifiable { let id: String; let kind: String; let value: Double }
+
+    func limitsCard(_ starts: [String: JSON]) -> some View {
+        let order = ["minute", "hour", "day"]
+        let keys = starts.keys.sorted { (order.firstIndex(of: $0) ?? 9) < (order.firstIndex(of: $1) ?? 9) }
+        let bars: [Bar] = keys.flatMap { k -> [Bar] in
+            let lim = starts[k]?["limit"]?.double ?? 0, rem = starts[k]?["remaining"]?.double ?? 0
+            return [Bar(id: k + "u", kind: "Used", value: max(0, lim - rem)), Bar(id: k + "r", kind: "Remaining", value: rem)]
+        }
+        return VStack(alignment: .leading, spacing: 12) {
+            Eyebrow(text: "Start rate limits")
+            HStack(alignment: .center, spacing: 24) {
+                ForEach(keys, id: \.self) { k in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(starts[k]?["remaining"]?.string ?? "?")").font(.system(size: 22, weight: .semibold, design: .rounded)).foregroundStyle(BD.text)
+                        Text("of \(starts[k]?["limit"]?.string ?? "?") per \(k)").font(.bdSmall).foregroundStyle(BD.text3)
+                    }
+                }
+                Chart(bars) { b in
+                    BarMark(x: .value("Starts", b.value), y: .value("Window", String(b.id.dropLast())))
+                        .foregroundStyle(by: .value("Kind", b.kind))
+                        .cornerRadius(3)
+                }
+                .chartForegroundStyleScale(["Used": BD.text, "Remaining": BD.surfaceHi])
+                .chartLegend(position: .bottom, alignment: .leading)
+                .chartXAxis(.hidden)
+                .frame(height: 90)
+            }
+        }
+        .glassCard()
+    }
+
+    var orgsCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Eyebrow(text: "Organizations & wallets")
+                Spacer()
+                Button("Personal") { Task { await state.cli("Switched to personal", ["org", "switch", "personal"]); orgs = try? await state.api.orgs(); await state.refreshAll() } }
+                    .bdButton(.ghost, .small).disabled(state.cliPath == nil)
+                Button { newOrg() } label: { Label("New org", systemImage: "plus") }.bdButton(.secondary, .small).disabled(state.cliPath == nil)
+                Button { invite() } label: { Label("Invite", systemImage: "person.badge.plus") }.bdButton(.secondary, .small).disabled(state.cliPath == nil)
+            }
+            let list = orgs?.list("orgs", "organizations") ?? []
+            if list.isEmpty { Text("Only your personal wallet.").font(.bdSmall).foregroundStyle(BD.text3) }
+            ForEach(list, id: \.self) { o in
+                let name = o.first("name", "slug", "id")?.string ?? "?"
+                let active = o["active"]?.bool == true
+                HStack(spacing: 12) {
+                    Avatar(name: name, size: 28)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(name).font(.system(size: 13, weight: .medium)).foregroundStyle(BD.text)
+                        Text(o["role"]?.string ?? "member").font(.bdSmall).foregroundStyle(BD.text3)
+                    }
+                    Spacer()
+                    if active { Chip(text: "active", icon: "checkmark") }
+                    else {
+                        Button("Use wallet") { Task { await switchOrg(name: name, id: o["id"]?.string ?? name) } }.bdButton(.secondary, .small)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+        }
+        .glassCard()
+    }
+
+    func newOrg() {
+        guard let n = promptText("New organization", ok: "Create") else { return }
+        Task { await state.cli("Org created", ["org", "create", n]); orgs = try? await state.api.orgs() }
+    }
+    func invite() {
+        guard let e = promptText("Invite by email", ok: "Invite") else { return }
+        Task { await state.cli("Invited \(e)", ["org", "invite", e]) }
+    }
+
+    func switchOrg(name: String, id: String) async {
+        let body: JSON = .object(["org": .string(name), "orgId": .string(id)])
+        let op: (BoatAPI) async throws -> JSON = { api in try await api.call("PATCH", "/orgs/active", body: body) }
+        await state.runOrCLI("Switched to \(name)", cli: ["org", "switch", name], op)
+        orgs = try? await state.api.orgs()
+        await state.refreshAll()
+    }
+
+    func load() async {
+        await state.refreshAll()
+        orgs = try? await state.api.orgs()
+        retention = try? await state.api.dataRetention()
+    }
+}
+
+// MARK: - CLI console
+
+struct CLIConsoleView: View {
+    @EnvironmentObject var state: AppState
+    @VState private var args = ""
+    @VState private var output = ""
+    @VState private var running = false
+    @VState private var stopper: (() -> Void)?
+
+    let presets = ["status", "list", "limits", "env list", "snapshot list", "webhook list", "api-key list",
+                   "conversations", "org list", "self-update", "--help"]
+
+    var body: some View {
+        Page {
+            PageHeader(title: "Console", subtitle: state.cliPath.map { "Running \($0)" } ?? "The boat CLI isn't installed yet.") {
+                HStack {
+                    Button { if let p = state.cliPath { BoatCLI.openInTerminal(p, args.isEmpty ? ["status"] : split(args)) } } label: {
+                        Label("Open in Terminal", systemImage: "arrow.up.forward.app")
+                    }
+                    .bdButton().disabled(state.cliPath == nil)
+                    if state.cliPath == nil {
+                        Button { BoatCLI.openInTerminal("/bin/zsh", ["-lc", "curl -fsSL https://boat.dev/install | sh"]) } label: {
+                            Label("Install CLI", systemImage: "arrow.down.circle")
+                        }
+                        .bdButton(.primary)
+                    }
+                }
+            }
+            .appear()
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(presets, id: \.self) { p in
+                        Button("boat \(p)") { args = p; run() }.bdButton(.secondary, .small).font(.bdMonoSmall)
+                    }
+                }
+            }
+
+            VStack(spacing: 0) {
+                LogView(text: output.isEmpty ? "# Output of boat commands appears here.\n# Interactive commands (ssh, login) open in Terminal." : output, onDark: true)
+                    .frame(minHeight: 380)
+                Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1)
+                HStack(spacing: 8) {
+                    Text("boat").font(.system(size: 13, weight: .semibold, design: .monospaced)).foregroundColor(BD.green)
+                    TextField("", text: $args, prompt: Text("list --json").foregroundColor(.white.opacity(0.25)))
+                        .textFieldStyle(.plain).font(.system(size: 13, design: .monospaced)).foregroundColor(.white)
+                        .onSubmit { run() }
+                    if running { Spinner(size: 12, color: .white.opacity(0.6)); Button("Stop") { stopper?(); running = false }.bdButton(.danger, .small) }
+                    Button("Clear") { output = "" }.bdButton(.ghost, .small)
+                }
+                .padding(12)
+            }
+            .background(Color(red: 0.03, green: 0.03, blue: 0.035), in: RoundedRectangle(cornerRadius: BD.r3, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: BD.r3, style: .continuous).strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
+            .environment(\.colorScheme, .dark)
+            .appear(delay: 0.05)
+        }
+    }
+
+    func split(_ s: String) -> [String] {
+        var out: [String] = [], cur = "", q: Character? = nil
+        for ch in s {
+            if let qq = q { if ch == qq { q = nil } else { cur.append(ch) } }
+            else if ch == "\"" || ch == "'" { q = ch }
+            else if ch == " " { if !cur.isEmpty { out.append(cur); cur = "" } }
+            else { cur.append(ch) }
+        }
+        if !cur.isEmpty { out.append(cur) }
+        return out
+    }
+
+    func run() {
+        guard let cli = state.cliPath else { output += "boat CLI not found. Install: curl -fsSL https://boat.dev/install | sh\n"; return }
+        let a = split(args)
+        if ["ssh", "login", "onboard"].contains(a.first ?? "") {
+            BoatCLI.openInTerminal(cli, a); output += "→ opened `boat \(args)` in Terminal (interactive)\n"; return
+        }
+        output += "\n$ boat \(args)\n"
+        running = true
+        let (stream, stop) = BoatCLI.stream(cli, a + ["--no-update"])
+        stopper = stop
+        Task {
+            for await chunk in stream { output += stripANSI(chunk) }
+            running = false
+            await state.refreshSandboxes(silent: true)
+        }
+    }
+}
