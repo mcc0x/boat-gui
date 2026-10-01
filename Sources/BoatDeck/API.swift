@@ -231,13 +231,31 @@ final class BoatAPI: @unchecked Sendable {
         return try await call("POST", sb(id) + "/host", body: .object(b))
     }
 
+    /// Collect list pages without silently hiding older records.
+    func collection(_ path: String, keys: [String]) async throws -> [Record] {
+        var result: [Record] = []
+        var cursor: String?
+        var visited = Set<String>()
+        repeat {
+            try Task.checkCancellation()
+            let response = try await call("GET", path, query: ["cursor": cursor])
+            let items = keys.compactMap { response[$0]?.array }.first ?? response.array ?? []
+            result.append(contentsOf: items.map(Record.init))
+            cursor = response["pageInfo"]?["nextCursor"]?.string ?? response["nextCursor"]?.string
+            if let cursor, !visited.insert(cursor).inserted {
+                throw BoatError(status: 0, code: "invalid_cursor", message: "The API repeated a pagination cursor.")
+            }
+        } while cursor != nil
+        return result
+    }
+
     // Snapshots
     func sandboxSnapshots(_ id: String) async throws -> [Record] {
-        try await call("GET", sb(id) + "/snapshots").list("snapshots").map(Record.init)
+        try await collection(sb(id) + "/snapshots", keys: ["snapshots"])
     }
-    func allSnapshots() async throws -> [Record] { try await call("GET", "/snapshots").list("snapshots").map(Record.init) }
+    func allSnapshots() async throws -> [Record] { try await collection("/snapshots", keys: ["snapshots"]) }
     func namedSnapshots() async throws -> [Record] {
-        try await call("GET", "/named-snapshots").list("namedSnapshots", "snapshots", "named").map(Record.init)
+        try await collection("/named-snapshots", keys: ["namedSnapshots", "snapshots", "named"])
     }
     func saveNamedSnapshot(sandboxId: String, name: String) async throws -> JSON {
         try await call("POST", "/named-snapshots", body: ["sandboxId": .string(sandboxId), "name": .string(name)])

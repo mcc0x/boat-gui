@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AgentEvent: Identifiable, Equatable {
     let id = UUID()
+    var sourceID: String? = nil
     var kind: String
     var convo: String?
     var text: String
@@ -10,11 +11,11 @@ struct AgentEvent: Identifiable, Equatable {
 
     enum Role { case user, assistant, tool, result, system, error }
     var role: Role {
-        if kind.hasPrefix("you") { return .user }
+        if kind == "prompt" || kind.hasPrefix("you") { return .user }
         if kind.contains("tool_call") { return .tool }
         if kind.contains("tool_result") { return .result }
         if kind.contains("error") { return .error }
-        if kind.hasSuffix(".text") || kind.hasSuffix("message") { return .assistant }
+        if kind == "response" || kind.hasSuffix(".text") || kind.hasSuffix("message") { return .assistant }
         return .system
     }
 }
@@ -276,32 +277,28 @@ struct AgentView: View {
     func connect() {
         streamTask?.cancel()
         let convo = selectedConvo
+        let client = state.api
         streamTask = Task {
-            var seen = Set<String>()
-            var first = true
+            var pager = EventPager()
             while !Task.isCancelled {
                 do {
-                    let r = try await state.api.call("GET", state.api.sb(id) + "/events",
-                                                     query: ["conversation": convo, "limit": "100"])
-                    var list = r.list("events")
-                    // Oldest first, whatever order the server used.
-                    let ts: (JSON) -> String = { $0.first("createdAt", "timestamp", "time", "ts")?.string ?? "" }
-                    if list.count > 1, ts(list[0]) > ts(list[list.count - 1]) { list.reverse() }
-                    for ev in list {
-                        let key = ev.first("id", "eventId", "seq")?.string ?? ev.compact
-                        if seen.insert(key).inserted { ingest(ev) }
-                    }
-                    if first, list.isEmpty { working = false }
-                    first = false
+                    let response = try await client.call("GET", client.sb(id) + "/events",
+                        query: ["conversation": convo, "limit": "100", "sort": "asc", "cursor": pager.cursor])
+                    try Task.checkCancellation()
+                    let page = try pager.accept(response)
+                    for event in page.events { ingest(event) }
                     streaming = true
+                    if page.hasMore { continue } // Drain every page before waiting.
                 } catch {
+                    guard !Task.isCancelled else { return }
                     streaming = false
-                    if !Task.isCancelled, let e = error as? BoatError, e.status == 403 {
-                        events.append(AgentEvent(kind: "error", convo: nil, text: "This API key can't read agent events (\(e.message)).", raw: e.json ?? .null))
+                    if let error = error as? BoatError, [401, 403].contains(error.status) {
+                        events.append(AgentEvent(kind: "error", convo: nil, text: "This API key can't read agent events (\(error.message)).", raw: .null))
                         return
                     }
                 }
-                try? await Task.sleep(nanoseconds: (working ? 1_500_000_000 : 4_000_000_000))
+                do { try await Task.sleep(nanoseconds: working ? 1_500_000_000 : 4_000_000_000) }
+                catch { return }
             }
         }
     }
@@ -311,14 +308,9 @@ struct AgentView: View {
         let convo = ev.first("conversationId", "conversation")?.string
         let data = ev["data"] ?? .null
         var text: String
-        if type.hasSuffix(".text") || type.hasSuffix("message") {
+        if type == "response" || type.hasSuffix(".text") || type.hasSuffix("message") {
             working = data["is_streaming"]?.bool ?? false
             text = data.first("text", "content", "message")?.string ?? ev.first("text", "message")?.string ?? ""
-            if let last = events.last, last.kind == type, last.convo == convo {
-                if text.hasPrefix(last.text) { events[events.count - 1].text = text } else { events[events.count - 1].text += text }
-                events[events.count - 1].raw = ev
-                return
-            }
         } else if type.contains("tool_call") {
             working = true
             let tools = data["tools"]?.array ?? [data]
@@ -333,7 +325,12 @@ struct AgentView: View {
         } else {
             text = data == .null ? ev.compact : (data.first("text", "message", "state")?.string ?? data.compact)
         }
-        events.append(AgentEvent(kind: type, convo: convo, text: text, raw: ev))
+        let sourceID = ev.first("id", "eventId", "seq")?.string ?? ev.compact
+        if let index = events.firstIndex(where: { $0.sourceID == sourceID }) {
+            events[index].text = text; events[index].raw = ev
+        } else {
+            events.append(AgentEvent(sourceID: sourceID, kind: type, convo: convo, text: text, raw: ev))
+        }
         if events.count > 3000 { events.removeFirst(500) }
         if type.contains("done") || type.contains("complete") || type.contains("finished") || type.contains("idle") {
             working = false

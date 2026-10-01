@@ -33,6 +33,7 @@ func expectThrows(_ work: () throws -> Void) throws {
         try testMetadataLogging()
         try testCredentialPersistence()
         try await testProcesses()
+        try testEventPagination()
         print("API, logging, credential and process regression checks passed.")
     }
 }
