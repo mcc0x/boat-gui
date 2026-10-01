@@ -1,0 +1,18 @@
+# SwiftPM / build output
+.build/
+build/
+*.app
+*.dSYM
+build.log
+
+# Dev-loop artefacts
+.rebuild
+.sync/
+sample.txt
+run.log
+
+# macOS
+.DS_Store
+.swiftpm/
+*.xcodeproj/
+xcuserdata/
