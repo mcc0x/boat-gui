@@ -74,7 +74,7 @@ struct CLIResult {
 enum BoatCLI {
     static var candidates: [String] {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return ["\(home)/.boat/bin/boat", "\(home)/.local/bin/boat", "/opt/homebrew/bin/boat",
+        return ["\(home)/.boat/bin/boat", "\(home)/.ascii/bin/boat", "\(home)/.local/bin/boat", "/opt/homebrew/bin/boat",
                 "/usr/local/bin/boat", "\(home)/.homebrew/bin/boat", "\(home)/bin/boat", "\(home)/.cargo/bin/boat"]
     }
 
@@ -87,62 +87,44 @@ enum BoatCLI {
         return p.hasPrefix("/") && FileManager.default.isExecutableFile(atPath: p) ? p : nil
     }
 
-    static func runSync(_ exe: String, _ args: [String], stdin: String? = nil, timeout: TimeInterval = 120) -> CLIResult {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: exe)
-        p.arguments = args
+    private static var environment: [String: String] {
         var env = ProcessInfo.processInfo.environment
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        env["PATH"] = "\(home)/.boat/bin:\(home)/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:" + (env["PATH"] ?? "")
+        env["PATH"] = "\(home)/.boat/bin:\(home)/.ascii/bin:\(home)/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:" + (env["PATH"] ?? "")
         env["NO_COLOR"] = "1"
-        p.environment = env
-        let out = Pipe(), err = Pipe(), inp = Pipe()
-        p.standardOutput = out; p.standardError = err; p.standardInput = inp
-        do { try p.run() } catch { return CLIResult(exitCode: -1, stdout: "", stderr: error.localizedDescription) }
-        if let stdin { inp.fileHandleForWriting.write(Data(stdin.utf8)) }
-        try? inp.fileHandleForWriting.close()
-        var outData = Data(), errData = Data()
-        let g = DispatchGroup()
-        g.enter(); DispatchQueue.global().async { outData = out.fileHandleForReading.readDataToEndOfFile(); g.leave() }
-        g.enter(); DispatchQueue.global().async { errData = err.fileHandleForReading.readDataToEndOfFile(); g.leave() }
-        let deadline = DispatchTime.now() + timeout
-        if g.wait(timeout: deadline) == .timedOut { p.terminate() ; g.wait() }
-        p.waitUntilExit()
-        return CLIResult(exitCode: p.terminationStatus,
-                         stdout: String(decoding: outData, as: UTF8.self),
-                         stderr: String(decoding: errData, as: UTF8.self))
+        return env
+    }
+
+    static func runSync(_ exe: String, _ args: [String], stdin: String? = nil, timeout: TimeInterval = 120) -> CLIResult {
+        ProcessRunner.run(exe, args, environment: environment, stdin: stdin, timeout: timeout)
     }
 
     static func run(_ binary: String, _ args: [String], stdin: String? = nil, timeout: TimeInterval = 300) async -> CLIResult {
-        await withCheckedContinuation { cont in
-            DispatchQueue.global().async {
-                cont.resume(returning: runSync(binary, args + ["--no-update"], stdin: stdin, timeout: timeout))
+        let cancellation = ProcessCancellation()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                DispatchQueue.global().async {
+                    continuation.resume(returning: ProcessRunner.run(binary, args + ["--no-update"],
+                        environment: environment, stdin: stdin, timeout: timeout, cancellation: cancellation))
+                }
             }
-        }
+        } onCancel: { cancellation.cancel() }
     }
 
-    /// Streams merged stdout/stderr lines of a long-running command.
+    /// Streams recent output with bounded buffering. Cancelling the consumer stops the child.
     static func stream(_ binary: String, _ args: [String]) -> (AsyncStream<String>, () -> Void) {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: binary)
-        p.arguments = args
-        var env = ProcessInfo.processInfo.environment
-        env["NO_COLOR"] = "1"
-        p.environment = env
-        let pipe = Pipe()
-        p.standardOutput = pipe; p.standardError = pipe
-        let stream = AsyncStream<String> { cont in
-            pipe.fileHandleForReading.readabilityHandler = { h in
-                let d = h.availableData
-                if d.isEmpty { h.readabilityHandler = nil; cont.finish(); return }
-                cont.yield(String(decoding: d, as: UTF8.self))
+        let cancellation = ProcessCancellation()
+        let stream = AsyncStream<String>(bufferingPolicy: .bufferingNewest(128)) { continuation in
+            continuation.onTermination = { _ in cancellation.cancel() }
+            DispatchQueue.global().async {
+                let result = ProcessRunner.run(binary, args, environment: environment,
+                    timeout: 60 * 60 * 24, cancellation: cancellation,
+                    onOutput: { continuation.yield($0) })
+                continuation.yield("\n[exit \(result.exitCode)]\n")
+                continuation.finish()
             }
-            p.terminationHandler = { proc in
-                cont.yield("\n[exit \(proc.terminationStatus)]\n")
-            }
-            do { try p.run() } catch { cont.yield("Failed: \(error.localizedDescription)\n"); cont.finish() }
         }
-        return (stream, { if p.isRunning { p.terminate() } })
+        return (stream, { cancellation.cancel() })
     }
 
     /// Opens Terminal.app running a boat command (for interactive things like ssh / login).
@@ -161,7 +143,7 @@ enum BoatCLI {
             // Fallback: .command file
             let url = FileManager.default.temporaryDirectory.appendingPathComponent("boatdeck-\(UUID().uuidString).command")
             try? "#!/bin/zsh\n\(cmd)\n".write(to: url, atomically: true, encoding: .utf8)
-            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: url.path)
             NSWorkspace.shared.open(url)
         }
     }

@@ -32,6 +32,7 @@ func expectThrows(_ work: () throws -> Void) throws {
         try api.testCredentialsOnlySentToHTTPSOrLoopback()
         try testMetadataLogging()
         try testCredentialPersistence()
-        print("API, logging and credential regression checks passed (7).")
+        try await testProcesses()
+        print("API, logging, credential and process regression checks passed.")
     }
 }
