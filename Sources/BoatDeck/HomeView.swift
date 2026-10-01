@@ -14,71 +14,39 @@ struct HomeView: View {
 
     var body: some View {
         Page {
-            HeroBanner(greeting: greeting).appear()
+            HomeHeader(greeting: greeting).appear()
 
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: 4), spacing: 14) {
-                StatTile(title: "Active", value: "\(state.runningCount)",
-                         sub: state.concurrency.1.map { "of \(Int($0)) allowed at once" } ?? "\(state.sandboxes.count) sandboxes total", icon: "shippingbox",
-                         ring: concurrencyRatio, ringColor: BD.green)
-                    .appear(delay: 0.03)
-                StatTile(title: "Credit", value: state.creditHours.map { String(format: "%.1fh", $0) } ?? "—",
-                         sub: packText, icon: "clock")
-                    .appear(delay: 0.06)
-                StatTile(title: "Starts left", value: startsText, sub: startsSub, icon: "bolt",
-                         ring: startsRatio, ringColor: BD.text)
-                    .appear(delay: 0.09)
-                StatTile(title: "Environments", value: "\(state.environments.count)",
-                         sub: "\(state.namedSnapshots.count) named snapshots", icon: "leaf")
-                    .appear(delay: 0.12)
-            }
+            MetricStrip(metrics: [
+                Metric(title: "Active", value: "\(state.runningCount)",
+                       sub: state.concurrency.1.map { "of \(Int($0)) allowed at once" } ?? "\(state.sandboxes.count) total",
+                       icon: "shippingbox", ring: concurrencyRatio, ringColor: BD.green),
+                Metric(title: "Credit", value: state.creditHours.map { String(format: "%.1fh", $0) } ?? "—",
+                       sub: creditSub, icon: "clock"),
+                Metric(title: "Starts left", value: startsText, sub: startsSub, icon: "bolt", ring: startsRatio),
+                Metric(title: "Environments", value: "\(state.environments.count)",
+                       sub: "\(state.namedSnapshots.count) named snapshots", icon: "leaf"),
+            ])
+            .appear(delay: 0.04)
 
-            HStack(alignment: .top, spacing: 14) {
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack {
-                        Eyebrow(text: "Recent sandboxes")
-                        Spacer()
-                        Button("View all") { withAnimation(BD.spring) { state.section = .sandboxes } }.bdButton(.ghost, .small)
-                    }
-                    if state.sandboxes.isEmpty && state.loadedOnce {
-                        EmptyStateView(icon: "shippingbox", title: "No sandboxes yet",
-                                       message: "Spin up an isolated Linux VM with Docker, Node, Python, Go, Rust and coding agents.",
-                                       actionTitle: "Launch a sandbox") { state.showNewSandbox = true }
-                            .frame(height: 300)
-                    } else if !state.loadedOnce {
-                        VStack(spacing: 0) { ForEach(0..<3, id: \.self) { _ in SkeletonRow() } }
-                    } else {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 250), spacing: 12)], spacing: 12) {
-                            ForEach(Array(recent.enumerated()), id: \.element.id) { i, s in
-                                SandboxCard(s: s).appear(delay: 0.03 * Double(i))
-                                    .tapAction { state.open(sandbox: s.id) }
-                            }
-                        }
-                    }
+            Hairline()
+
+            Columns(rightWidth: 300, breakpoint: 860) {
+                RecentSandboxes()
+            } right: {
+                VStack(alignment: .leading, spacing: 30) {
+                    FleetSection()
+                    ActivitySection()
                 }
-                .frame(maxWidth: .infinity, alignment: .topLeading)
-                .glassCard()
-
-                VStack(spacing: 14) {
-                    StateMixCard()
-                    ActivityCard()
-                }
-                .frame(width: 330)
             }
-            .appear(delay: 0.15)
+            .appear(delay: 0.08)
         }
     }
 
-    var recent: [Record] {
-        Array(state.sandboxes.sorted { ($0["createdAt"] ?? "") > ($1["createdAt"] ?? "") }.prefix(6))
-    }
     var concurrencyRatio: Double? {
         guard let l = state.concurrency.1, l > 0 else { return nil }
         return state.concurrency.0 / l
     }
-    var startsText: String {
-        guard let d = state.limits?["starts"]?["day"] else { return "—" }
-        return d["remaining"]?.string ?? "—"
-    }
+    var startsText: String { state.limits?["starts"]?["day"]?["remaining"]?.string ?? "—" }
     var startsSub: String {
         guard let l = state.limits?["starts"]?["day"]?["limit"]?.string else { return "today" }
         return "of \(l) today"
@@ -87,52 +55,103 @@ struct HomeView: View {
         guard let d = state.limits?["starts"]?["day"], let l = d["limit"]?.double, l > 0 else { return nil }
         return (d["remaining"]?.double ?? 0) / l
     }
-    var packText: String {
-        if let d = state.limits?.first("packBalanceDollars")?.double { return String(format: "$%.2f in packs", d) }
-        return state.limits?["canStart"]?.bool == false ? "can't start — top up" : "plan + credit packs"
+    var creditSub: String {
+        if let tier = state.limits?["accessTier"]?.string, tier == "trial" { return "trial balance" }
+        if let d = state.limits?.first("packBalanceDollars")?.double, d > 0 { return String(format: "$%.2f in packs", d) }
+        return state.limits?["canStart"]?.bool == false ? "can't start — add credit" : "compute balance"
     }
 }
 
-struct HeroBanner: View {
+struct HomeHeader: View {
     let greeting: String
     @EnvironmentObject var state: AppState
-    @EnvironmentObject var prefs: UIPrefs
+    @Environment(\.contentWidth) var width
 
     var body: some View {
-        ZStack(alignment: .leading) {
-            WaveField().opacity(0.9)
-            HStack(alignment: .center) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(Date(), format: .dateTime.weekday(.wide).month().day())
-                        .font(.system(size: 11.5, weight: .medium)).foregroundStyle(BD.text3).textCase(.uppercase)
-                    Text(greeting).font(.system(size: 30, weight: .semibold)).foregroundStyle(BD.text)
-                    Text(summary).font(.bdBody).foregroundStyle(BD.text2)
-                }
-                Spacer()
+        ZStack(alignment: .topLeading) {
+            WaveField()
+                .frame(height: 140)
+                .offset(y: -20)
+                .opacity(0.8)
+            PageHeader(title: greeting, subtitle: summary) {
                 HStack(spacing: 8) {
-                    Button { state.showPalette = true } label: { Label("Search", systemImage: "command") }.bdButton(.secondary, .large)
-                    Button { Task { await state.quickLaunch() } } label: { Label("Quick launch", systemImage: "bolt.fill") }
-                        .bdButton(.secondary, .large)
-                    Button { state.showNewSandbox = true } label: { Label("New sandbox", systemImage: "plus") }
-                        .bdButton(.primary, .large)
+                    if width >= 760 {
+                        Button { state.showPalette = true } label: { Label("Search", systemImage: "command") }.bdButton()
+                    }
+                    Button { Task { await state.quickLaunch() } } label: { Label("Quick launch", systemImage: "bolt.fill") }.bdButton()
+                    Button { state.showNewSandbox = true } label: { Label("New sandbox", systemImage: "plus") }.bdButton(.primary)
                 }
             }
-            .padding(26)
+            .padding(.top, 18)
+            Text(Date(), format: .dateTime.weekday(.wide).month().day())
+                .font(.system(size: 11, weight: .semibold)).foregroundStyle(BD.text3).textCase(.uppercase).tracking(0.6)
         }
-        .frame(height: 150)
-        .clipShape(RoundedRectangle(cornerRadius: BD.r4, style: .continuous))
-        .glassCard(radius: BD.r4, padding: 0)
     }
 
     var summary: String {
         let n = state.runningCount
         if !state.loadedOnce { return "Syncing with boat.dev…" }
-        if n == 0 { return "All quiet on deck. No sandboxes are running right now." }
+        if n == 0 { return "All quiet on deck — no sandboxes running." }
         return "\(n) sandbox\(n == 1 ? " is" : "es are") running."
     }
 }
 
-/// Animated line-wave field used as hero art.
+struct RecentSandboxes: View {
+    @EnvironmentObject var state: AppState
+    var recent: [Record] {
+        Array(state.sandboxes.sorted { ($0.isActive ? 0 : 1, $1["createdAt"] ?? "") < ($1.isActive ? 0 : 1, $0["createdAt"] ?? "") }.prefix(8))
+    }
+    var body: some View {
+        FlatSection("Sandboxes", icon: "shippingbox") {
+            Button("View all") { state.go(.sandboxes) }.bdButton(.ghost, .small)
+        } content: {
+            if !state.loadedOnce {
+                VStack(spacing: 0) { ForEach(0..<3, id: \.self) { _ in SkeletonRow() } }
+            } else if state.sandboxes.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("No sandboxes yet. Each one is an isolated Linux VM with Docker, Node, Python, Go, Rust and coding agents.")
+                        .font(.bdBody).foregroundStyle(BD.text2).fixedSize(horizontal: false, vertical: true)
+                    Button { state.showNewSandbox = true } label: { Label("Launch a sandbox", systemImage: "plus") }.bdButton(.primary)
+                }
+                .padding(.vertical, 8)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(recent) { s in
+                        SandboxListRow(s: s)
+                            .listRow(divider: s.id != recent.last?.id)
+                            .tapAction { state.open(sandbox: s.id) }
+                            .contextMenu { SandboxQuickActions(id: s.id) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Compact, width-aware sandbox row used on Home and in the Sandboxes list.
+struct SandboxListRow: View {
+    let s: Record
+    @Environment(\.contentWidth) var width
+    var body: some View {
+        HStack(spacing: 12) {
+            StatusDot(state: s.state, size: 7)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(s.displayName).font(.system(size: 13, weight: .medium)).foregroundStyle(BD.text).lineLimit(1)
+                Text([s.id, s.specs, s["environment"]].compactMap { $0 }.joined(separator: " · "))
+                    .font(.system(size: 11)).foregroundStyle(BD.text3).lineLimit(1)
+            }
+            .layoutPriority(1)
+            Spacer(minLength: 8)
+            if width >= 700, s.isActive, let d = s.archiveAfter, d > Date() {
+                Label(d.formatted(.relative(presentation: .named, unitsStyle: .narrow)), systemImage: "hourglass")
+                    .labelStyle(TightLabel()).font(.bdSmall).foregroundStyle(BD.text3).lineLimit(1)
+            }
+            StateBadge(state: s.state)
+        }
+    }
+}
+
+/// Animated line-wave field used as header art.
 struct WaveField: View {
     @EnvironmentObject var prefs: UIPrefs
     @Environment(\.controlActiveState) private var active
@@ -151,17 +170,17 @@ struct WaveField: View {
                         let y = base + sin(x / 90 + phase) * amp + sin(x / 37 - phase * 0.7) * amp * 0.25
                         if x == 0 { p.move(to: CGPoint(x: x, y: y)) } else { p.addLine(to: CGPoint(x: x, y: y)) }
                     }
-                    let fade = 0.02 + 0.07 * Double(i) / Double(lines)
+                    let fade = 0.02 + 0.06 * Double(i) / Double(lines)
                     ctx.stroke(p, with: .color(BD.text.opacity(fade)), lineWidth: 1)
                 }
             }
         }
-        .mask(LinearGradient(colors: [.clear, .black, .black], startPoint: .leading, endPoint: .trailing))
+        .mask(LinearGradient(colors: [.clear, .black.opacity(0.9), .clear], startPoint: .leading, endPoint: .trailing))
         .allowsHitTesting(false)
     }
 }
 
-struct StateMixCard: View {
+struct FleetSection: View {
     @EnvironmentObject var state: AppState
     struct Slice: Identifiable { let id: String; let count: Int }
 
@@ -171,27 +190,26 @@ struct StateMixCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Eyebrow(text: "Fleet")
-            HStack(spacing: 16) {
+        FlatSection("Fleet", icon: "chart.pie") {
+            HStack(spacing: 18) {
                 ZStack {
                     if slices.isEmpty {
-                        Circle().stroke(BD.surfaceHi, lineWidth: 12)
+                        Circle().stroke(BD.surfaceHi, lineWidth: 10)
                     } else {
                         Chart(slices) { s in
-                            SectorMark(angle: .value("Count", s.count), innerRadius: .ratio(0.68), angularInset: 2)
+                            SectorMark(angle: .value("Count", s.count), innerRadius: .ratio(0.7), angularInset: 2)
                                 .cornerRadius(3)
                                 .foregroundStyle(colorForState(s.id))
                         }
                         .chartLegend(.hidden)
                     }
                     VStack(spacing: 0) {
-                        Text("\(state.sandboxes.count)").font(.system(size: 20, weight: .semibold, design: .rounded)).foregroundStyle(BD.text)
+                        Text("\(state.sandboxes.count)").font(.system(size: 18, weight: .semibold, design: .rounded)).foregroundStyle(BD.text)
                             .contentTransition(.numericText())
-                        Text("total").font(.system(size: 10)).foregroundStyle(BD.text3)
+                        Text("total").font(.system(size: 9.5)).foregroundStyle(BD.text3)
                     }
                 }
-                .frame(width: 104, height: 104)
+                .frame(width: 86, height: 86)
                 .animation(BD.spring, value: state.sandboxes.count)
 
                 VStack(alignment: .leading, spacing: 6) {
@@ -207,58 +225,44 @@ struct StateMixCard: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .glassCard()
     }
 }
 
-struct ActivityCard: View {
+struct ActivitySection: View {
     @EnvironmentObject var state: AppState
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Eyebrow(text: "Activity")
-                Spacer()
-                if !state.activity.isEmpty {
-                    Button("Clear") { withAnimation(BD.spring) { state.clearActivity() } }.bdButton(.ghost, .small)
-                }
+        FlatSection("Activity", icon: "waveform.path.ecg") {
+            if !state.activity.isEmpty {
+                Button("Clear") { withAnimation(BD.spring) { state.clearActivity() } }.bdButton(.ghost, .small)
             }
+        } content: {
             if state.activity.isEmpty {
-                VStack(spacing: 6) {
-                    Image(systemName: "waveform.path.ecg").font(.system(size: 22, weight: .light)).foregroundStyle(BD.text3)
-                    Text("State changes will show up here as they happen.").font(.bdSmall).foregroundStyle(BD.text3)
-                        .multilineTextAlignment(.center)
-                }
-                .frame(maxWidth: .infinity).padding(.vertical, 24)
+                Text("State changes show up here as they happen.").font(.bdSmall).foregroundStyle(BD.text3)
             } else {
                 VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(state.activity.prefix(8).enumerated()), id: \.element.id) { i, a in
+                    let items = Array(state.activity.prefix(8))
+                    ForEach(Array(items.enumerated()), id: \.element.id) { i, a in
                         HStack(alignment: .top, spacing: 10) {
                             VStack(spacing: 0) {
-                                Circle().fill(colorForState(a.to)).frame(width: 8, height: 8).padding(.top, 4)
-                                if i < min(7, state.activity.count - 1) {
-                                    Rectangle().fill(BD.stroke).frame(width: 1).frame(maxHeight: .infinity)
-                                }
+                                Circle().fill(colorForState(a.to)).frame(width: 7, height: 7).padding(.top, 5)
+                                if i < items.count - 1 { Rectangle().fill(BD.stroke).frame(width: 1).frame(maxHeight: .infinity) }
                             }
-                            .frame(width: 8)
+                            .frame(width: 7)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(a.name).font(.system(size: 12, weight: .medium)).foregroundStyle(BD.text).lineLimit(1)
                                 Text(a.from == "—" ? "appeared as \(a.to)" : "\(a.from) → \(a.to)")
                                     .font(.bdSmall).foregroundStyle(BD.text2)
                             }
-                            Spacer()
-                            Text(a.date, style: .relative).font(.system(size: 10)).foregroundStyle(BD.text3)
+                            Spacer(minLength: 6)
+                            Text(a.date, format: .relative(presentation: .numeric, unitsStyle: .narrow))
+                                .font(.system(size: 10)).foregroundStyle(BD.text3)
                         }
-                        .frame(minHeight: 38, alignment: .top)
-                        .contentShape(Rectangle())
+                        .frame(minHeight: 40, alignment: .top)
                         .tapAction { state.open(sandbox: a.sandboxId) }
-                        .transition(.move(edge: .top).combined(with: .opacity))
                     }
                 }
                 .animation(BD.spring, value: state.activity)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .glassCard()
     }
 }

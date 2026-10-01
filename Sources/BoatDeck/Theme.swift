@@ -110,7 +110,7 @@ final class UIPrefs: ObservableObject {
     @AppStorage("ui.motion") var motion: Bool = true
     @AppStorage("ui.density") var density: Density = .comfortable
     @AppStorage("ui.sidebarCollapsed") var sidebarCollapsed: Bool = false
-    @AppStorage("ui.sandboxLayout") var sandboxLayout: String = "grid"
+    @AppStorage("ui.sandboxLayout") var sandboxLayout: String = "list"
     @AppStorage("ui.menuBar") var showMenuBar: Bool = true
 
     static let shared = UIPrefs()

@@ -19,6 +19,7 @@ enum DetailTab: String, CaseIterable, Identifiable {
 struct SandboxDetailView: View {
     @EnvironmentObject var state: AppState
     let sandboxId: String
+    var showBack = false
     @VState private var tab: DetailTab = .overview
     @VState private var detail: JSON?
 
@@ -26,57 +27,110 @@ struct SandboxDetailView: View {
     var sbState: String { record?.state ?? detail?.first("state", "status")?.string ?? "unknown" }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-                .padding(.horizontal, 26).padding(.top, 40).padding(.bottom, 14)
-            HStack {
-                PillPicker(options: DetailTab.allCases.map { PillOption(value: $0, label: $0.rawValue, icon: $0.icon) }, selection: $tab)
-                Spacer()
-            }
-            .padding(.horizontal, 26).padding(.bottom, 14)
-            Group {
-                switch tab {
-                case .overview: OverviewTab(id: sandboxId, detail: $detail)
-                case .agent: AgentView(id: sandboxId)
-                case .terminal: TerminalView(id: sandboxId)
-                case .files: FilesView(id: sandboxId)
-                case .access: AccessTab(id: sandboxId)
-                case .snapshots: SandboxSnapshotsTab(id: sandboxId)
+        WidthReader { w in
+            let gutter: CGFloat = w < 640 ? 18 : 28
+            VStack(alignment: .leading, spacing: 0) {
+                header(w)
+                    .padding(.horizontal, gutter).padding(.top, 40).padding(.bottom, 18)
+                UnderlineTabs(tabs: DetailTab.allCases, selection: $tab, iconsOnly: w < 700)
+                    .padding(.horizontal, gutter)
+                Hairline()
+                Group {
+                    switch tab {
+                    case .overview: OverviewTab(id: sandboxId, detail: $detail)
+                    case .agent: AgentView(id: sandboxId)
+                    case .terminal: TerminalView(id: sandboxId)
+                    case .files: FilesView(id: sandboxId)
+                    case .access: AccessTab(id: sandboxId)
+                    case .snapshots: SandboxSnapshotsTab(id: sandboxId)
+                    }
                 }
+                .environment(\.detailGutter, gutter)
+                .id(tab)
+                .transition(.opacity)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .id(tab)
-            .transition(.opacity.combined(with: .offset(y: 6)))
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .animation(BD.snappy, value: tab)
         .task { detail = try? await state.api.sandbox(sandboxId) }
     }
 
-    var header: some View {
-        HStack(alignment: .center, spacing: 16) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 14, style: .continuous).fill(BD.surfaceHi)
-                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(BD.stroke, lineWidth: 1))
-                Image(systemName: "shippingbox.fill").font(.system(size: 22)).foregroundStyle(BD.text)
+    func header(_ w: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if showBack {
+                Button { withAnimation(BD.spring) { state.selectedSandbox = nil } } label: { Label("Sandboxes", systemImage: "chevron.left") }
+                    .bdButton(.ghost, .small)
             }
-            .frame(width: 52, height: 52)
-            .overlay(alignment: .bottomTrailing) { StatusDot(state: sbState, size: 9).offset(x: 9, y: 9) }
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .center, spacing: 16) {
+                    titleBlock
+                    Spacer(minLength: 16)
+                    LifecycleButtons(id: sandboxId, sbState: sbState)
+                }
+                VStack(alignment: .leading, spacing: 12) {
+                    titleBlock
+                    LifecycleButtons(id: sandboxId, sbState: sbState)
+                }
+            }
+        }
+    }
 
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 10) {
-                    Text(record?.displayName ?? sandboxId).font(.system(size: 22, weight: .semibold)).foregroundStyle(BD.text)
-                        .lineLimit(1)
-                    StateBadge(state: sbState)
-                }
-                HStack(spacing: 6) {
-                    CopyChip(value: sandboxId)
-                    Chip(text: record?.specs ?? "4 vCPU · 8 GB", icon: "cpu")
-                    if let e = record?["environment", "environmentName"] { Chip(text: e, icon: "leaf") }
-                    if let ip = detail?.first("machineIp", "ip")?.string { Chip(text: ip, icon: "network", mono: true) }
-                }
+    var titleBlock: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                StatusDot(state: sbState, size: 9)
+                Text(record?.displayName ?? sandboxId).font(.system(size: 22, weight: .semibold)).foregroundStyle(BD.text)
+                    .lineLimit(1)
+                StateBadge(state: sbState)
             }
-            Spacer()
-            LifecycleButtons(id: sandboxId, sbState: sbState)
+            FlowLayout(spacing: 6, lineSpacing: 6) {
+                CopyChip(value: sandboxId)
+                Chip(text: record?.specs ?? "4 vCPU · 8 GB", icon: "cpu")
+                if let e = record?["environment", "environmentName"] { Chip(text: e, icon: "leaf") }
+                if let ssh = detail?["sshEndpoint"]?.string { Chip(text: ssh, icon: "terminal", mono: true) }
+            }
+        }
+    }
+}
+
+private struct DetailGutterKey: EnvironmentKey { static let defaultValue: CGFloat = 28 }
+extension EnvironmentValues {
+    var detailGutter: CGFloat {
+        get { self[DetailGutterKey.self] }
+        set { self[DetailGutterKey.self] = newValue }
+    }
+}
+
+/// Flat tab bar with a sliding underline.
+struct UnderlineTabs: View {
+    let tabs: [DetailTab]
+    @Binding var selection: DetailTab
+    var iconsOnly = false
+    @VNamespace private var ns
+    var body: some View {
+        HStack(spacing: iconsOnly ? 6 : 20) {
+            ForEach(tabs) { t in
+                let on = t == selection
+                Button { withAnimation(BD.snappy) { selection = t } } label: {
+                    VStack(spacing: 8) {
+                        HStack(spacing: 6) {
+                            Image(systemName: t.icon).font(.system(size: 12))
+                            if !iconsOnly { Text(t.rawValue).font(.system(size: 13, weight: on ? .semibold : .regular)) }
+                        }
+                        .foregroundStyle(on ? BD.text : BD.text2)
+                        .padding(.horizontal, iconsOnly ? 8 : 0)
+                        ZStack {
+                            Rectangle().fill(Color.clear).frame(height: 2)
+                            if on { Capsule().fill(BD.text).frame(height: 2).matchedGeometryEffect(id: "u", in: ns) }
+                        }
+                    }
+                    .fixedSize()
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(t.rawValue)
+            }
+            Spacer(minLength: 0)
         }
     }
 }
@@ -139,19 +193,22 @@ struct OverviewTab: View {
         return max(d.timeIntervalSince(c), remaining ?? 0, 60)
     }
 
+    @Environment(\.detailGutter) var gutter
+
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 28) {
                 if let error { Text(error).font(.bdSmall).foregroundStyle(BD.red).textSelection(.enabled) }
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: 3), spacing: 14) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 250), spacing: 28, alignment: .top)], alignment: .leading, spacing: 22) {
                     lifetimeCard.appear()
                     usageCard.appear(delay: 0.04)
                     machineCard.appear(delay: 0.08)
                 }
 
-                VStack(alignment: .leading, spacing: 12) {
-                    Eyebrow(text: "Quick actions")
-                    ScrollView(.horizontal, showsIndicators: false) { HStack(spacing: 8) {
+                Hairline()
+
+                FlatSection("Actions", icon: "bolt") {
+                    FlowLayout(spacing: 8, lineSpacing: 8) {
                         if let u = detail?["url"]?.string, let url = URL(string: u) {
                             Button { NSWorkspace.shared.open(url) } label: { Label("Open URL", systemImage: "safari") }.bdButton(.primary)
                         }
@@ -168,20 +225,20 @@ struct OverviewTab: View {
                             }
                         } label: { Label("Snapshot", systemImage: "camera") }.bdButton()
                         Button { Task { await downloadArtifacts() } } label: { Label("Artifacts", systemImage: "arrow.down.doc") }.bdButton()
-                    }.padding(1) }
+                    }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .glassCard()
                 .appear(delay: 0.1)
 
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack { Eyebrow(text: "All fields"); Spacer(); RawJSONButton(json: detail) }
-                    JSONGrid(json: detail ?? .null)
+                Hairline()
+
+                FlatSection("Details", icon: "list.bullet.rectangle") {
+                    RawJSONButton(json: detail)
+                } content: {
+                    FieldColumns(json: detail ?? .null)
                 }
-                .glassCard()
                 .appear(delay: 0.14)
             }
-            .padding(.horizontal, 26).padding(.bottom, 26)
+            .padding(.horizontal, gutter).padding(.top, 24).padding(.bottom, 28)
         }
         .scrollContentBackground(.hidden)
         .task { await load() }
@@ -204,8 +261,7 @@ struct OverviewTab: View {
             }
             Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity, minHeight: 96, alignment: .leading)
-        .glassCard()
+        .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
     }
 
     var remainingText: String {
@@ -244,8 +300,7 @@ struct OverviewTab: View {
             }
             Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity, minHeight: 96, alignment: .leading)
-        .glassCard()
+        .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
     }
 
     var machineCard: some View {
@@ -265,8 +320,7 @@ struct OverviewTab: View {
             KVRow(key: "SSH", value: detail?["sshEndpoint"]?.string, copy: true)
             KVRow(key: "Billing", value: detail?["billingMultiplier"]?.double.map { "\(String(format: "%g", $0))× rate" })
         }
-        .frame(maxWidth: .infinity, minHeight: 96, alignment: .leading)
-        .glassCard()
+        .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
     }
 
     func load() async {
@@ -314,18 +368,19 @@ struct AccessTab: View {
     @VState private var fwdLocal = ""
     @VState private var forwards: [Forward] = []
     @VState private var sshKey = ""
+    @Environment(\.detailGutter) var gutter
 
     var body: some View {
         ScrollView {
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)], alignment: .leading, spacing: 14) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 330), spacing: 40, alignment: .top)], alignment: .leading, spacing: 32) {
                 card("Public URL", "globe", "Expose a port on a boat.dev URL with a token.") {
                     HStack {
                         Field(placeholder: "Port", text: $port, mono: true).frame(width: 80)
                         Field(placeholder: "Title (optional)", text: $title)
                     }
                     HStack {
-                        Toggle("Public (no token)", isOn: $isPublic).toggleStyle(.switch).controlSize(.small)
-                        Spacer()
+                        Toggle("Public (no token)", isOn: $isPublic).toggleStyle(.switch).controlSize(.small).fixedSize()
+                        Spacer(minLength: 8)
                         Button { Task { await host() } } label: { Label("Create URL", systemImage: "link") }.bdButton(.primary, .small)
                     }
                     ForEach(hosted) { h in
@@ -341,10 +396,10 @@ struct AccessTab: View {
                 }
                 card("Port forward", "arrow.left.arrow.right", "Tunnel a sandbox port to localhost on this Mac.") {
                     HStack {
-                        Field(placeholder: "Remote", text: $fwdRemote, mono: true).frame(width: 90)
+                        Field(placeholder: "Remote", text: $fwdRemote, mono: true).frame(maxWidth: 90)
                         Image(systemName: "arrow.right").foregroundStyle(BD.text3)
-                        Field(placeholder: "Local (same)", text: $fwdLocal, mono: true).frame(width: 110)
-                        Spacer()
+                        Field(placeholder: "Local (same)", text: $fwdLocal, mono: true).frame(maxWidth: 110)
+                        Spacer(minLength: 8)
                         Button { startForward() } label: { Label("Start", systemImage: "play.fill") }.bdButton(.primary, .small)
                             .disabled(state.cliPath == nil)
                     }
@@ -365,7 +420,7 @@ struct AccessTab: View {
                     }
                 }
                 card("SSH", "terminal", "Shell into the sandbox, or authorize one of your keys.") {
-                    HStack {
+                    FlowLayout(spacing: 8) {
                         Button { if let p = state.cliPath { BoatCLI.openInTerminal(p, ["ssh", id]) } } label: { Label("Open in Terminal", systemImage: "terminal") }
                             .bdButton(.primary, .small).disabled(state.cliPath == nil)
                         CopyChip(value: "boat ssh \(id)")
@@ -381,7 +436,7 @@ struct AccessTab: View {
                     }
                 }
             }
-            .padding(.horizontal, 26).padding(.bottom, 26)
+            .padding(.horizontal, gutter).padding(.top, 24).padding(.bottom, 28)
             .animation(BD.spring, value: hosted.count)
             .animation(BD.spring, value: forwards.count)
         }
@@ -402,7 +457,6 @@ struct AccessTab: View {
             c()
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        .glassCard()
         .appear()
     }
 
@@ -450,6 +504,7 @@ struct SandboxSnapshotsTab: View {
     @VState private var snaps: [Record] = []
     @VState private var loaded = false
     @VState private var error: String?
+    @Environment(\.detailGutter) var gutter
 
     var body: some View {
         ScrollView {
@@ -494,8 +549,7 @@ struct SandboxSnapshotsTab: View {
                     }
                 }
             }
-            .glassCard()
-            .padding(.horizontal, 26).padding(.bottom, 26)
+            .padding(.horizontal, gutter).padding(.top, 24).padding(.bottom, 28)
         }
         .scrollContentBackground(.hidden)
         .task { await load() }
@@ -504,5 +558,29 @@ struct SandboxSnapshotsTab: View {
     func load() async {
         do { snaps = try await state.api.sandboxSnapshots(id); error = nil } catch { self.error = error.localizedDescription }
         loaded = true
+    }
+}
+
+/// All fields of a record as flat key/value rows, split into two columns when there's room.
+struct FieldColumns: View {
+    let json: JSON
+    var skip: Set<String> = ["ok", "type"]
+    @Environment(\.contentWidth) var width
+    var body: some View {
+        let keys = (json.object ?? [:]).keys.sorted().filter { !skip.contains($0) && json[$0] != .null }
+        let cols = width >= 900 ? 2 : 1
+        let per = Int((Double(keys.count) / Double(cols)).rounded(.up))
+        HStack(alignment: .top, spacing: 32) {
+            ForEach(0..<cols, id: \.self) { c in
+                VStack(spacing: 0) {
+                    ForEach(Array(keys.dropFirst(c * per).prefix(per)), id: \.self) { k in
+                        let v = json[k] ?? .null
+                        KVRow(key: k, value: v.string ?? v.compact, mono: true)
+                        Hairline()
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .top)
+            }
+        }
     }
 }

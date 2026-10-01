@@ -43,9 +43,17 @@ struct AgentView: View {
 
     var selectedConvo: String? { convoSel == "__all__" ? nil : convoSel }
 
+    @Environment(\.contentWidth) var width
+    @Environment(\.detailGutter) var gutter
+    var showList: Bool { width >= 880 }
+
     var body: some View {
-        HStack(spacing: 14) {
-            conversationList.frame(width: 250)
+        HStack(spacing: 0) {
+            if showList {
+                conversationList.frame(width: 230)
+                    .padding(.leading, gutter - 10).padding(.trailing, 12).padding(.vertical, 14)
+                Rectangle().fill(BD.stroke).frame(width: 1)
+            }
             VStack(spacing: 0) {
                 chatHeader
                 Hairline()
@@ -67,9 +75,8 @@ struct AgentView: View {
                 }
                 composer
             }
-            .glassCard(padding: 0)
+            .padding(.horizontal, showList ? 4 : gutter - 14)
         }
-        .padding(.horizontal, 26).padding(.bottom, 26)
         .task {
             provider = state.agentProvider; model = state.agentModel; effort = state.agentEffort
             await loadConvos()
@@ -106,7 +113,7 @@ struct AgentView: View {
             }
             .scrollContentBackground(.hidden)
         }
-        .glassCard(padding: 12)
+
     }
 
     func convoRow(id cid: String, title: String, sub: String, running: Bool, icon: String) -> some View {
@@ -132,20 +139,35 @@ struct AgentView: View {
 
     var chatHeader: some View {
         HStack(spacing: 10) {
+            if !showList {
+                Menu {
+                    Button("All activity") { convoSel = "__all__" }
+                    ForEach(convos) { c in Button(c["lastPromptPreview", "title"] ?? c.id) { convoSel = c.id } }
+                    Divider()
+                    Button("New conversation") { newConvo = true; convoSel = "__all__" }
+                } label: {
+                    Label(selectedConvo.flatMap { id in convos.first { $0.id == id }?["lastPromptPreview"] } ?? "All activity", systemImage: "bubble.left.and.text.bubble.right")
+                        .labelStyle(TightLabel()).lineLimit(1)
+                }
+                .menuStyle(.borderlessButton).fixedSize().font(.bdSmall)
+            }
             HStack(spacing: 6) {
                 StatusDot(state: streaming ? "running" : "archived", size: 6)
                 Text(streaming ? (working ? "Agent working…" : "Live") : "Connecting…").font(.bdSmall).foregroundStyle(BD.text2)
             }
             if newConvo { Chip(text: "new conversation", icon: "sparkle") }
-            Spacer()
-            Toggle("Raw events", isOn: $showRaw).toggleStyle(.switch).controlSize(.mini).font(.bdSmall)
-            Button("Clear") { withAnimation { events.removeAll() } }.bdButton(.ghost, .small)
+            Spacer(minLength: 8)
+            Menu {
+                Toggle("Show raw events", isOn: $showRaw)
+                Button("Clear transcript") { withAnimation { events.removeAll() } }
+            } label: { Image(systemName: "ellipsis.circle").foregroundStyle(BD.text2) }
+            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
             Button { Task { await state.run("Interrupted", refresh: false) { try await $0.interrupt(id, convo: selectedConvo) } } } label: {
                 Label("Interrupt", systemImage: "stop.circle")
             }
             .bdButton(.danger, .small)
         }
-        .padding(.horizontal, 14).padding(.vertical, 10)
+        .padding(.horizontal, 10).padding(.vertical, 10)
     }
 
     var visibleEvents: [AgentEvent] {
@@ -182,7 +204,7 @@ struct AgentView: View {
 
     var composer: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
+            FlowLayout(spacing: 6, lineSpacing: 6) {
                 menuChip(icon: "cpu", title: provider.isEmpty ? "Agent: default" : provider) {
                     Button("Default") { provider = ""; model = "" }
                     ForEach(state.catalog.keys.sorted(), id: \.self) { p in Button(p) { provider = p; model = "" } }
@@ -197,8 +219,8 @@ struct AgentView: View {
                         Button(e) { effort = e }
                     }
                 }
-                Spacer()
-                Toggle("New conversation", isOn: $newConvo.animation(BD.snappy)).toggleStyle(.checkbox).font(.bdSmall)
+                Toggle("New conversation", isOn: $newConvo.animation(BD.snappy)).toggleStyle(.checkbox).font(.bdSmall).fixedSize()
+                    .padding(.leading, 4).frame(height: 24)
             }
             HStack(alignment: .bottom, spacing: 8) {
                 TextField(selectedConvo == nil || newConvo ? "Ask the agent to do something…" : "Continue this conversation…",

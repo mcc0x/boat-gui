@@ -39,24 +39,30 @@ struct SandboxesView: View {
     }
 
     var body: some View {
-        Group {
-            if let id = state.selectedSandbox {
-                HStack(spacing: 0) {
-                    compactList.frame(width: 280)
-                    Rectangle().fill(BD.stroke).frame(width: 1)
-                    SandboxDetailView(sandboxId: id)
-                        .id(id)
-                        .transition(.asymmetric(insertion: .opacity.combined(with: .offset(x: 16)), removal: .opacity))
+        WidthReader { w in
+            Group {
+                if let id = state.selectedSandbox {
+                    HStack(spacing: 0) {
+                        if w >= 980 {
+                            compactList.frame(width: 248)
+                                .transition(.move(edge: .leading).combined(with: .opacity))
+                            Rectangle().fill(BD.stroke).frame(width: 1)
+                        }
+                        SandboxDetailView(sandboxId: id, showBack: w < 980)
+                            .id(id)
+                            .transition(.asymmetric(insertion: .opacity.combined(with: .offset(x: 16)), removal: .identity))
+                    }
+                    .animation(BD.spring, value: w >= 980)
+                    .transition(.opacity)
+                } else {
+                    overview.transition(.opacity)
                 }
-                .transition(.opacity)
-            } else {
-                overview.transition(.opacity)
             }
         }
         .animation(BD.spring, value: state.selectedSandbox)
     }
 
-    // MARK: Overview (grid / table)
+    // MARK: Overview (grid / list)
 
     var overview: some View {
         Page {
@@ -69,15 +75,14 @@ struct SandboxesView: View {
             }
             .appear()
 
-            HStack(spacing: 10) {
+            FlowLayout(spacing: 10, lineSpacing: 10) {
                 PillPicker(options: [
                     PillOption(value: "all", label: "All \(count("all"))"),
                     PillOption(value: "active", label: "Active \(count("active"))"),
                     PillOption(value: "archived", label: "Archived \(count("archived"))"),
                     PillOption(value: "error", label: "Error \(count("error"))"),
                 ], selection: $filter)
-                Spacer()
-                SearchField(text: $search, prompt: "Filter by name, id, environment").frame(width: 280)
+                SearchField(text: $search, prompt: "Filter by name, id, environment").frame(width: 250)
                 Menu {
                     Picker("Sort", selection: $sort) {
                         Text("Newest first").tag("newest")
@@ -85,53 +90,35 @@ struct SandboxesView: View {
                         Text("State").tag("state")
                     }
                     .pickerStyle(.inline)
-                } label: { Image(systemName: "arrow.up.arrow.down") }
-                .menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 28)
+                } label: { Label("Sort", systemImage: "arrow.up.arrow.down") }
+                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                .frame(height: 30)
                 PillPicker(options: [
-                    PillOption(value: "grid", label: "", icon: "square.grid.2x2"),
                     PillOption(value: "list", label: "", icon: "list.bullet"),
+                    PillOption(value: "grid", label: "", icon: "square.grid.2x2"),
                 ], selection: $prefs.sandboxLayout)
             }
             .appear(delay: 0.04)
 
             if !state.loadedOnce {
-                VStack(spacing: 0) { ForEach(0..<5, id: \.self) { _ in SkeletonRow() } }.glassCard()
+                VStack(spacing: 0) { ForEach(0..<5, id: \.self) { _ in SkeletonRow() } }
             } else if filtered.isEmpty {
                 EmptyStateView(icon: state.sandboxes.isEmpty ? "shippingbox" : "line.3.horizontal.decrease.circle",
                                title: state.sandboxes.isEmpty ? "No sandboxes yet" : "Nothing matches",
                                message: state.lastError ?? (state.sandboxes.isEmpty ? "Launch your first sandbox — it stops itself after an hour unless you say otherwise." : "Try a different filter or search."),
                                actionTitle: state.sandboxes.isEmpty ? "New sandbox" : nil) { state.showNewSandbox = true }
-                    .frame(minHeight: 380)
-                    .glassCard()
+                    .frame(minHeight: 340)
             } else if prefs.sandboxLayout == "grid" {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 290), spacing: 14)], spacing: 14) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 16)], spacing: 16) {
                     ForEach(Array(filtered.enumerated()), id: \.element.id) { i, s in
-                        SandboxCard(s: s, large: true)
+                        SandboxCard(s: s)
                             .appear(delay: min(0.3, 0.025 * Double(i)))
                             .tapAction { state.open(sandbox: s.id) }
                             .contextMenu { SandboxQuickActions(id: s.id) }
                     }
                 }
             } else {
-                VStack(spacing: 0) {
-                    HStack {
-                        Text("Name").frame(maxWidth: .infinity, alignment: .leading)
-                        Text("State").frame(width: 120, alignment: .leading)
-                        Text("Machine").frame(width: 120, alignment: .leading)
-                        Text("Environment").frame(width: 130, alignment: .leading)
-                        Text("Created").frame(width: 100, alignment: .trailing)
-                    }
-                    .font(.system(size: 10.5, weight: .semibold)).foregroundStyle(BD.text3).textCase(.uppercase)
-                    .padding(.horizontal, 14).padding(.vertical, 10)
-                    Hairline()
-                    ForEach(filtered) { s in
-                        SandboxTableRow(s: s)
-                            .tapAction { state.open(sandbox: s.id) }
-                            .contextMenu { SandboxQuickActions(id: s.id) }
-                        Hairline()
-                    }
-                }
-                .glassCard(padding: 0)
+                SandboxTable(rows: filtered)
             }
         }
     }
@@ -150,7 +137,7 @@ struct SandboxesView: View {
             }
             SearchField(text: $search, prompt: "Filter")
             ScrollView {
-                LazyVStack(spacing: 4) {
+                LazyVStack(spacing: 2) {
                     ForEach(filtered) { s in
                         CompactRow(s: s, selected: s.id == state.selectedSandbox)
                             .tapAction { withAnimation(BD.spring) { state.selectedSandbox = s.id } }
@@ -161,7 +148,6 @@ struct SandboxesView: View {
             .scrollContentBackground(.hidden)
         }
         .padding(.horizontal, 12).padding(.top, 40).padding(.bottom, 12)
-        .background(BD.bg.opacity(0.35))
     }
 }
 
@@ -179,90 +165,94 @@ struct CompactRow: View {
             Spacer()
         }
         .padding(.horizontal, 8).padding(.vertical, 7)
-        .background(selected ? BD.surfaceHi : hover ? BD.surface : .clear, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(selected ? BD.stroke : .clear, lineWidth: 1))
+        .background(selected ? BD.surfaceHi : hover ? BD.surface : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .contentShape(Rectangle())
         .onHover { hover = $0 }
         .animation(BD.soft, value: hover)
     }
 }
 
+/// Grid card. The only surface on the page (no nested panels inside).
 struct SandboxCard: View {
     let s: Record
-    var large = false
     @EnvironmentObject var state: AppState
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous).fill(BD.surfaceHi)
-                    Image(systemName: "shippingbox").font(.system(size: 15)).foregroundStyle(BD.text)
-                }
-                .frame(width: 36, height: 36)
-                .overlay(alignment: .bottomTrailing) { StatusDot(state: s.state, size: 7).offset(x: 8, y: 8) }
-                Spacer()
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                StatusDot(state: s.state, size: 7)
+                Text(s.displayName).font(.system(size: 14, weight: .semibold)).foregroundStyle(BD.text).lineLimit(1)
+                Spacer(minLength: 6)
                 StateBadge(state: s.state)
             }
-            VStack(alignment: .leading, spacing: 3) {
-                Text(s.displayName).font(.system(size: 14, weight: .semibold)).foregroundStyle(BD.text).lineLimit(1)
-                Text(s.id).font(.bdMonoSmall).foregroundStyle(BD.text3).lineLimit(1).truncationMode(.middle)
-            }
-            HStack(spacing: 6) {
-                Chip(text: s.specs, icon: "cpu")
-                if let e = s["environment", "environmentName"] { Chip(text: e, icon: "leaf") }
+            Text([s.id, s.specs, s["environment"]].compactMap { $0 }.joined(separator: " · "))
+                .font(.system(size: 11)).foregroundStyle(BD.text3).lineLimit(1)
+            HStack(spacing: 8) {
                 if s.isActive, let d = s.archiveAfter, d > Date() {
-                    Chip(text: "stops " + d.formatted(.relative(presentation: .named, unitsStyle: .narrow)), icon: "hourglass")
-                }
-                Spacer(minLength: 0)
-            }
-            if large {
-                Hairline()
-                HStack {
+                    Label("stops " + d.formatted(.relative(presentation: .named, unitsStyle: .narrow)), systemImage: "hourglass")
+                } else {
                     Label(relative(s["createdAt", "created_at"]), systemImage: "clock")
-                        .font(.bdSmall).foregroundStyle(BD.text3).labelStyle(TightLabel())
-                    Spacer()
-                    if s.isArchived {
-                        Button { Task { await state.run("Resuming") { try await $0.resume(s.id) } } } label: { Label("Resume", systemImage: "play.fill") }
-                            .bdButton(.secondary, .small)
-                    } else if s.isActive {
-                        Button { if let p = state.cliPath { BoatCLI.openInTerminal(p, ["ssh", s.id]) } } label: { Label("SSH", systemImage: "terminal") }
-                            .bdButton(.ghost, .small).disabled(state.cliPath == nil)
-                        Button { Task { await state.run("Stopping") { try await $0.stop(s.id) } } } label: { Label("Stop", systemImage: "stop.fill") }
-                            .bdButton(.secondary, .small)
-                    }
+                }
+                Spacer(minLength: 6)
+                if s.isArchived {
+                    Button { Task { await state.run("Resuming") { try await $0.resume(s.id) } } } label: { Label("Resume", systemImage: "play.fill") }
+                        .bdButton(.secondary, .small)
+                } else if s.isActive {
+                    Button { Task { await state.run("Stopping") { try await $0.stop(s.id) } } } label: { Label("Stop", systemImage: "stop.fill") }
+                        .bdButton(.secondary, .small)
                 }
             }
+            .labelStyle(TightLabel()).font(.bdSmall).foregroundStyle(BD.text3)
+            .padding(.top, 4)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassCard(radius: BD.r3, interactive: true)
-        .hoverLift()
-        .contentShape(Rectangle())
+        .glassCard(radius: 14, padding: 16, interactive: true)
+        .hoverLift(1.01)
     }
 }
 
-struct SandboxTableRow: View {
-    let s: Record
-    @VState private var hover = false
+/// Flat table; columns drop out as the page narrows.
+struct SandboxTable: View {
+    let rows: [Record]
+    @EnvironmentObject var state: AppState
+    @Environment(\.contentWidth) var width
+
+    var showMachine: Bool { width >= 760 }
+    var showEnv: Bool { width >= 900 }
+    var showCreated: Bool { width >= 620 }
+
     var body: some View {
-        HStack {
-            HStack(spacing: 8) {
-                StatusDot(state: s.state, size: 7)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(s.displayName).font(.system(size: 12.5, weight: .medium)).foregroundStyle(BD.text).lineLimit(1)
-                    Text(s.id).font(.bdMonoSmall).foregroundStyle(BD.text3).lineLimit(1)
-                }
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Text("Name").frame(maxWidth: .infinity, alignment: .leading)
+                Text("State").frame(width: 104, alignment: .leading)
+                if showMachine { Text("Machine").frame(width: 110, alignment: .leading) }
+                if showEnv { Text("Environment").frame(width: 110, alignment: .leading) }
+                if showCreated { Text("Created").frame(width: 90, alignment: .trailing) }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            StateBadge(state: s.state).frame(width: 120, alignment: .leading)
-            Text(s.specs).font(.bdSmall).foregroundStyle(BD.text2).frame(width: 120, alignment: .leading)
-            Text(s["environment", "environmentName"] ?? "—").font(.bdSmall).foregroundStyle(BD.text2).frame(width: 130, alignment: .leading)
-            Text(relative(s["createdAt"])).font(.bdSmall).foregroundStyle(BD.text3).frame(width: 100, alignment: .trailing)
+            .font(.system(size: 10.5, weight: .semibold)).foregroundStyle(BD.text3).textCase(.uppercase)
+            .padding(.horizontal, 10).padding(.bottom, 8)
+            Hairline()
+            ForEach(rows) { s in
+                HStack(spacing: 12) {
+                    HStack(spacing: 9) {
+                        StatusDot(state: s.state, size: 7)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(s.displayName).font(.system(size: 13, weight: .medium)).foregroundStyle(BD.text).lineLimit(1)
+                            Text(s.id).font(.bdMonoSmall).foregroundStyle(BD.text3).lineLimit(1)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    StateBadge(state: s.state).frame(width: 104, alignment: .leading)
+                    if showMachine { Text(s.specs).font(.bdSmall).foregroundStyle(BD.text2).frame(width: 110, alignment: .leading).lineLimit(1) }
+                    if showEnv { Text(s["environment", "environmentName"] ?? "—").font(.bdSmall).foregroundStyle(BD.text2).frame(width: 110, alignment: .leading).lineLimit(1) }
+                    if showCreated { Text(relative(s["createdAt"])).font(.bdSmall).foregroundStyle(BD.text3).frame(width: 90, alignment: .trailing).lineLimit(1) }
+                }
+                .listRow(divider: s.id != rows.last?.id)
+                .tapAction { state.open(sandbox: s.id) }
+                .contextMenu { SandboxQuickActions(id: s.id) }
+            }
         }
-        .padding(.horizontal, 14).padding(.vertical, 10)
-        .background(hover ? BD.surface : .clear)
-        .contentShape(Rectangle())
-        .onHover { hover = $0 }
     }
 }
 

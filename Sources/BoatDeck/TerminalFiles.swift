@@ -16,6 +16,7 @@ struct TermLine: Identifiable, Equatable {
 
 struct TerminalView: View {
     @EnvironmentObject var state: AppState
+    @Environment(\.detailGutter) var gutter
     let id: String
     @VState private var command = ""
     @AppStorage("term.cwd") private var cwd = ""
@@ -146,7 +147,7 @@ struct TerminalView: View {
         .overlay(RoundedRectangle(cornerRadius: BD.r3, style: .continuous).strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
         .shadow(color: .black.opacity(0.35), radius: 24, y: 12)
         .environment(\.colorScheme, .dark)
-        .padding(.horizontal, 26).padding(.bottom, 26)
+        .padding(.horizontal, gutter).padding(.top, 20).padding(.bottom, 24)
         .onAppear { focused = true }
     }
 
@@ -261,6 +262,8 @@ struct FileEntry: Identifiable, Hashable {
 
 struct FilesView: View {
     @EnvironmentObject var state: AppState
+    @Environment(\.detailGutter) var gutter
+    @Environment(\.contentWidth) var width
     let id: String
     @AppStorage("files.path") private var path = "/home/user"
     @AppStorage("files.hidden") private var showHidden = true
@@ -279,8 +282,12 @@ struct FilesView: View {
         entries.filter { (showHidden || !$0.name.hasPrefix(".")) && (filter.isEmpty || $0.name.lowercased().contains(filter.lowercased())) }
     }
 
+    /// Narrow windows show one pane at a time: the editor replaces the list while a file is open.
+    var stacked: Bool { width < 820 }
+
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 0) {
+            if !stacked || openFile == nil {
             VStack(spacing: 0) {
                 toolbar
                 Hairline()
@@ -329,12 +336,16 @@ struct FilesView: View {
                 }
                 .padding(.horizontal, 12).padding(.vertical, 8)
             }
-            .frame(minWidth: 320, maxWidth: 440)
-            .glassCard(padding: 0)
-
-            editor.glassCard(padding: 0)
+            .frame(maxWidth: stacked ? .infinity : 400)
+            .padding(.leading, gutter - 10)
+            }
+            if !stacked || openFile != nil {
+                if !stacked { Rectangle().fill(BD.stroke).frame(width: 1) }
+                editor.padding(.horizontal, stacked ? gutter - 10 : 0)
+            }
         }
-        .padding(.horizontal, 26).padding(.bottom, 26)
+        .padding(.bottom, 8)
+        .animation(BD.snappy, value: openFile)
         .task { await list() }
     }
 

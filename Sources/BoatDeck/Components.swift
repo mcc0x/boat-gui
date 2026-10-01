@@ -283,26 +283,6 @@ struct Spinner: View {
 
 // MARK: - Layout pieces
 
-struct PageHeader<Trailing: View>: View {
-    let title: String
-    var subtitle: String = ""
-    @ViewBuilder var trailing: () -> Trailing
-    var body: some View {
-        HStack(alignment: .bottom, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title).font(.bdTitle).foregroundStyle(BD.text)
-                if !subtitle.isEmpty { Text(subtitle).font(.bdBody).foregroundStyle(BD.text2) }
-            }
-            Spacer()
-            trailing()
-        }
-    }
-}
-
-extension PageHeader where Trailing == EmptyView {
-    init(title: String, subtitle: String = "") { self.init(title: title, subtitle: subtitle, trailing: { EmptyView() }) }
-}
-
 struct EmptyStateView: View {
     let icon: String
     let title: String

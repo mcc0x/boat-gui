@@ -21,7 +21,7 @@ struct BoatDeckApp: App {
 
     var body: some Scene {
         WindowGroup("Boat Deck", id: "main") {
-            Themed { RootView().frame(minWidth: 1040, minHeight: 680) }
+            Themed { RootView().frame(minWidth: 720, minHeight: 540) }
                 .environmentObject(state)
                 .environmentObject(prefs)
         }

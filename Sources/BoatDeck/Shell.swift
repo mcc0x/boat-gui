@@ -11,10 +11,15 @@ struct RootView: View {
                 OnboardingView()
                     .transition(.opacity.combined(with: .scale(scale: 0.98)))
             } else {
-                HStack(spacing: 0) {
-                    Sidebar()
-                    content
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                GeometryReader { geo in
+                    HStack(spacing: 0) {
+                        Sidebar()
+                        content
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                    // Narrow windows get the icon-only sidebar automatically.
+                    .environment(\.sidebarCollapsed, prefs.sidebarCollapsed || geo.size.width < 900)
+                    .animation(BD.spring, value: geo.size.width < 900)
                 }
                 .transition(.opacity)
             }
@@ -47,7 +52,7 @@ struct RootView: View {
             }
         }
         .id(state.section)
-        .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 8)), removal: .opacity))
+        .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 8)), removal: .identity))
     }
 }
 
@@ -59,7 +64,7 @@ struct Sidebar: View {
     @VNamespace private var ns
     @Environment(\.openSettings) private var openSettings
 
-    var collapsed: Bool { prefs.sidebarCollapsed }
+    @Environment(\.sidebarCollapsed) var collapsed
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -165,6 +170,7 @@ struct SidebarItem: View {
     let ns: Namespace.ID
     @EnvironmentObject var state: AppState
     @EnvironmentObject var prefs: UIPrefs
+    @Environment(\.sidebarCollapsed) var collapsed
     @VState private var hover = false
 
     var selected: Bool { state.section == section }
@@ -191,7 +197,7 @@ struct SidebarItem: View {
                     .font(.system(size: 13.5, weight: .medium))
                     .frame(width: 20)
                     .foregroundStyle(selected ? BD.text : BD.text2)
-                if !prefs.sidebarCollapsed {
+                if !collapsed {
                     Text(section.rawValue).font(.system(size: 13, weight: selected ? .semibold : .regular))
                         .foregroundStyle(selected ? BD.text : BD.text2)
                     Spacer()
@@ -206,7 +212,7 @@ struct SidebarItem: View {
             }
             .padding(.horizontal, 10)
             .frame(height: 32)
-            .frame(maxWidth: .infinity, alignment: prefs.sidebarCollapsed ? .center : .leading)
+            .frame(maxWidth: .infinity, alignment: collapsed ? .center : .leading)
             .background {
                 if selected {
                     RoundedRectangle(cornerRadius: 9, style: .continuous)
@@ -221,7 +227,7 @@ struct SidebarItem: View {
         }
         .buttonStyle(.plain)
         .onHover { hover = $0 }
-        .help(prefs.sidebarCollapsed ? section.rawValue : "")
+        .help(collapsed ? section.rawValue : "")
     }
 }
 
@@ -303,16 +309,3 @@ struct SailShape: Shape {
     }
 }
 
-/// Standard scrolling page container with consistent padding.
-struct Page<Content: View>: View {
-    @ViewBuilder var content: () -> Content
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) { content() }
-                .padding(.horizontal, 32).padding(.top, 40).padding(.bottom, 32)
-                .frame(maxWidth: 1400, alignment: .leading)
-                .frame(maxWidth: .infinity)
-        }
-        .scrollContentBackground(.hidden)
-    }
-}

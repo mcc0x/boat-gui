@@ -6,7 +6,9 @@ struct EnvironmentsView: View {
     @VState private var error: String?
 
     var body: some View {
+        WidthReader { w in
         HStack(spacing: 0) {
+            if w >= 860 {
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
                     Text("Environments").font(.bdTitle).foregroundStyle(BD.text)
@@ -31,12 +33,13 @@ struct EnvironmentsView: View {
                 .scrollContentBackground(.hidden)
             }
             .padding(.horizontal, 16).padding(.top, 40).padding(.bottom, 20)
-            .frame(width: 264)
+            .frame(width: 250)
             Rectangle().fill(BD.stroke).frame(width: 1)
+            }
 
             Group {
                 if let s = selected, let env = state.environments.first(where: { $0.id == s }) {
-                    EnvironmentDetail(env: env, reload: reload)
+                    EnvironmentDetail(env: env, reload: reload, switcher: w < 860 ? AnyView(switcher) : nil)
                         .id(env.id)
                         .transition(.opacity.combined(with: .offset(x: 12)))
                 } else {
@@ -47,11 +50,22 @@ struct EnvironmentsView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        }
         .animation(BD.spring, value: selected)
         .task {
             await reload()
             if selected == nil { selected = state.environments.first(where: { $0.json["isDefault"]?.bool == true })?.id ?? state.environments.first?.id }
         }
+    }
+
+    /// Compact environment picker shown in the page header when the list column is hidden.
+    var switcher: some View {
+        Menu {
+            ForEach(state.environments) { e in Button(e.displayName) { withAnimation(BD.spring) { selected = e.id } } }
+            Divider()
+            Button("New environment…") { create() }
+        } label: { Label("Environments", systemImage: "leaf") }
+        .menuStyle(.borderlessButton).fixedSize()
     }
 
     func create() {
@@ -71,8 +85,7 @@ struct EnvRow: View {
     @VState private var hover = false
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: "leaf.fill").font(.system(size: 13)).foregroundStyle(BD.text)
-                .frame(width: 32, height: 32).background(BD.surfaceHi, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            Image(systemName: "leaf.fill").font(.system(size: 12)).foregroundStyle(selected ? BD.text : BD.text2).frame(width: 18)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(env.displayName).font(.system(size: 13, weight: .semibold)).foregroundStyle(BD.text)
@@ -83,9 +96,8 @@ struct EnvRow: View {
             }
             Spacer()
         }
-        .padding(10)
-        .background(selected ? BD.surfaceHi : hover ? BD.surface : .clear, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(selected ? BD.stroke : .clear, lineWidth: 1))
+        .padding(8)
+        .background(selected ? BD.surfaceHi : hover ? BD.surface : .clear, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
         .contentShape(Rectangle())
         .onHover { hover = $0 }
     }
@@ -95,6 +107,7 @@ struct EnvironmentDetail: View {
     @EnvironmentObject var state: AppState
     let env: Record
     let reload: () async -> Void
+    var switcher: AnyView? = nil
     @VState private var newKey = ""
     @VState private var newValue = ""
     @VState private var repoInput = ""
@@ -110,6 +123,7 @@ struct EnvironmentDetail: View {
         Page {
             PageHeader(title: name, subtitle: "Version \(env.envVersion)\(env.json["isDefault"]?.bool == true ? " · default environment" : "")") {
                 HStack(spacing: 8) {
+                    if let switcher { switcher }
                     if env.json["isDefault"]?.bool != true {
                         Button("Make default") { Task { await state.cli("Default set", ["env", "default", name]); await reload() } }.bdButton()
                     }
@@ -133,11 +147,13 @@ struct EnvironmentDetail: View {
             }
             .appear()
 
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: 14) { accessSection; reposSection }.frame(minWidth: 820)
-                VStack(spacing: 14) { accessSection; reposSection }
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 320), spacing: 40, alignment: .top)], alignment: .leading, spacing: 28) {
+                accessSection
+                reposSection
             }
             .appear(delay: 0.05)
+
+            Hairline()
 
             section("Variables", "dollarsign.square", trailing: AnyView(
                 Toggle("Reveal values", isOn: $reveal.animation(BD.soft)).toggleStyle(.switch).controlSize(.mini).font(.bdSmall)
@@ -158,7 +174,7 @@ struct EnvironmentDetail: View {
                         Hairline()
                     }
                     HStack {
-                        Field(placeholder: "KEY", text: $newKey, mono: true).frame(width: 220)
+                        Field(placeholder: "KEY", text: $newKey, mono: true).frame(maxWidth: 220)
                         Field(placeholder: "value", text: $newValue, secure: true)
                         Button { Task { await setVar() } } label: { Label("Set", systemImage: "plus") }
                             .bdButton(.primary, .small).disabled(newKey.isEmpty)
@@ -167,6 +183,8 @@ struct EnvironmentDetail: View {
                 }
             }
             .appear(delay: 0.1)
+
+            Hairline()
 
             section("Secret files", "lock.doc") {
                 VStack(alignment: .leading, spacing: 8) {
@@ -188,10 +206,11 @@ struct EnvironmentDetail: View {
             }
             .appear(delay: 0.14)
 
+            Hairline()
+
             DisclosureGroup {
-                JSONGrid(json: env.json).padding(.top, 8)
+                FieldColumns(json: env.json, skip: ["ok", "type", "envContents", "versions", "secretFiles", "selectedRepositories"]).padding(.top, 8)
             } label: { Eyebrow(text: "All fields") }
-            .glassCard()
         }
         .task { availableRepos = (try? await state.api.repos()) ?? [] }
     }
@@ -252,16 +271,16 @@ struct EnvironmentDetail: View {
 
     func section<C: View>(_ title: String, _ icon: String, trailing: AnyView? = nil, @ViewBuilder _ c: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Image(systemName: icon).font(.system(size: 12)).foregroundStyle(BD.text2)
-                Text(title).font(.bdH3).foregroundStyle(BD.text)
+            HStack(spacing: 7) {
+                Image(systemName: icon).font(.system(size: 11, weight: .semibold)).foregroundStyle(BD.text3)
+                Eyebrow(text: title)
                 Spacer()
                 if let trailing { trailing }
             }
+            .frame(minHeight: 22)
             c()
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        .glassCard()
     }
 
     func flagToggle(_ label: String, _ sub: String, key: String, cliFlag: String, topLevel: Bool = false) -> some View {

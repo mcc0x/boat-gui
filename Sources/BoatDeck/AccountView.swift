@@ -16,14 +16,21 @@ struct AccountView: View {
             }
             .appear()
 
-            HStack(alignment: .top, spacing: 14) {
+            AdaptiveStack(breakpoint: 820, spacing: 40) {
                 profileCard.appear(delay: 0.03)
                 balanceCard.appear(delay: 0.06)
             }
 
-            if let starts = state.limits?["starts"]?.object, !starts.isEmpty { limitsCard(starts).appear(delay: 0.09) }
+            Hairline()
+
+            if let starts = state.limits?["starts"]?.object, !starts.isEmpty {
+                limitsCard(starts).appear(delay: 0.09)
+                Hairline()
+            }
 
             orgsCard.appear(delay: 0.12)
+
+            Hairline()
 
             VStack(alignment: .leading, spacing: 10) {
                 Eyebrow(text: "Privacy")
@@ -39,7 +46,7 @@ struct AccountView: View {
                 .toggleStyle(.switch)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .glassCard()
+            
             .appear(delay: 0.15)
         }
         .task { await load() }
@@ -65,7 +72,7 @@ struct AccountView: View {
             } label: { Text("All fields").font(.bdSmall).foregroundStyle(BD.text3) }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        .glassCard()
+        
     }
 
     var balanceCard: some View {
@@ -110,7 +117,7 @@ struct AccountView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        .glassCard()
+        
     }
 
     func limitsCard(_ starts: [String: JSON]) -> some View {
@@ -119,7 +126,7 @@ struct AccountView: View {
             .sorted { (order.firstIndex(of: $0) ?? 9) < (order.firstIndex(of: $1) ?? 9) }
         return VStack(alignment: .leading, spacing: 14) {
             Eyebrow(text: "Sandbox start limits")
-            HStack(alignment: .top, spacing: 14) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: 14)], alignment: .leading, spacing: 14) {
                 ForEach(keys, id: \.self) { k in
                     let lim = starts[k]?["limit"]?.double ?? 0
                     let rem = starts[k]?["remaining"]?.double ?? 0
@@ -145,7 +152,7 @@ struct AccountView: View {
                 Text("No limit on longer windows.").font(.bdSmall).foregroundStyle(BD.text3)
             }
         }
-        .glassCard()
+        
     }
 
     var orgsCard: some View {
@@ -178,7 +185,7 @@ struct AccountView: View {
                 .padding(.vertical, 4)
             }
         }
-        .glassCard()
+        
     }
 
     func newOrg() {

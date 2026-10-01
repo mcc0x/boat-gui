@@ -26,13 +26,13 @@ struct SnapshotsView: View {
             if let error { Text(error).font(.bdSmall).foregroundStyle(BD.red) }
 
             if !loaded {
-                VStack(spacing: 0) { ForEach(0..<4, id: \.self) { _ in SkeletonRow() } }.glassCard()
+                VStack(spacing: 0) { ForEach(0..<4, id: \.self) { _ in SkeletonRow() } }
             } else if scope == "named" {
                 let items = state.namedSnapshots.filter { search.isEmpty || $0.displayName.lowercased().contains(search.lowercased()) }
                 if items.isEmpty {
                     EmptyStateView(icon: "tag", title: "No named snapshots",
                                    message: "Save one from any sandbox (⋯ › Save Named Snapshot) to reuse a fully set-up machine.")
-                        .frame(height: 360).glassCard()
+                        .frame(height: 360)
                 } else {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 14)], spacing: 14) {
                         ForEach(Array(items.enumerated()), id: \.element.id) { i, s in
@@ -42,7 +42,7 @@ struct SnapshotsView: View {
                 }
             } else {
                 let items = all.filter { search.isEmpty || $0.id.contains(search) || ($0["sandboxId"] ?? "").contains(search) }
-                HStack(alignment: .top, spacing: 14) {
+                AdaptiveStack {
                     VStack(spacing: 0) {
                         if items.isEmpty { Text("No snapshots.").font(.bdSmall).foregroundStyle(BD.text3).padding() }
                         ForEach(items) { s in
@@ -61,11 +61,9 @@ struct SnapshotsView: View {
                                     Task { await state.run("Snapshot deleted", refresh: false) { try await $0.deleteSnapshot(s.id) }; await reload() }
                                 }
                             }
-                            .padding(.vertical, 9).padding(.horizontal, 14)
-                            Hairline()
+                            .listRow(divider: s.id != items.last?.id)
                         }
                     }
-                    .glassCard(padding: 0)
                     if let tree {
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
@@ -76,8 +74,7 @@ struct SnapshotsView: View {
                             ScrollView { Text(treeText(tree.1)).font(.bdMonoSmall).foregroundStyle(BD.text2).textSelection(.enabled) }
                                 .frame(maxHeight: 520)
                         }
-                        .frame(width: 340)
-                        .glassCard()
+                        .frame(maxWidth: 360)
                         .transition(.move(edge: .trailing).combined(with: .opacity))
                     }
                 }
@@ -188,7 +185,7 @@ struct WebhooksView: View {
                     Button { Task { await create() } } label: { Label("Create", systemImage: "plus") }
                         .bdButton(.primary).disabled(url.isEmpty || events.isEmpty)
                 }
-                HStack(spacing: 6) {
+                FlowLayout(spacing: 6, lineSpacing: 6) {
                     ForEach(allEvents, id: \.self) { e in
                         let on = events.contains(e)
                         Button {
@@ -207,21 +204,21 @@ struct WebhooksView: View {
                     }
                 }
             }
-            .glassCard()
             .appear(delay: 0.04)
+
+            Hairline()
 
             if let error { Text(error).font(.bdSmall).foregroundStyle(BD.red) }
             if !loaded {
-                VStack(spacing: 0) { ForEach(0..<3, id: \.self) { _ in SkeletonRow() } }.glassCard()
+                VStack(spacing: 0) { ForEach(0..<3, id: \.self) { _ in SkeletonRow() } }
             } else if hooks.isEmpty {
                 EmptyStateView(icon: "antenna.radiowaves.left.and.right", title: "No webhooks",
                                message: "Add an endpoint above to be notified when a sandbox is ready, errors, archives or hydrates.")
-                    .frame(height: 320).glassCard()
+                    .frame(height: 320)
             } else {
                 VStack(spacing: 0) {
                     ForEach(hooks) { h in WebhookRow(h: h, reload: reload); Hairline() }
                 }
-                .glassCard(padding: 0)
                 .appear(delay: 0.08)
             }
         }
@@ -325,8 +322,8 @@ struct APIKeysView: View {
                         .buttonStyle(.plain)
                     }
                 }
-                HStack {
-                    Field(placeholder: "Key name", text: $name)
+                FlowLayout(spacing: 8, lineSpacing: 8) {
+                    Field(placeholder: "Key name", text: $name).frame(width: 200)
                     Field(placeholder: "TTL days", text: $ttlDays, mono: true).frame(width: 90)
                     Field(placeholder: "Only sandbox id", text: $sandbox, mono: true).frame(width: 160)
                     Field(placeholder: "Only env", text: $envName).frame(width: 120)
@@ -338,11 +335,10 @@ struct APIKeysView: View {
                         .font(.bdSmall).foregroundStyle(BD.text3)
                 }
             }
-            .glassCard()
             .appear(delay: 0.04)
 
             if let error { Text(error).font(.bdSmall).foregroundStyle(BD.text3) }
-            HStack(alignment: .top, spacing: 14) {
+            AdaptiveStack {
                 VStack(spacing: 0) {
                     if !loaded { ForEach(0..<3, id: \.self) { _ in SkeletonRow() } }
                     else if keys.isEmpty {
@@ -363,32 +359,22 @@ struct APIKeysView: View {
                                         .compactMap { $0 }.joined(separator: " · "))
                                     .font(.bdSmall).foregroundStyle(BD.text3)
                             }
-                            Spacer()
-                            Button("Usage") { Task { if let u = try? await state.api.apiKeyUsage(k.id) { withAnimation(BD.spring) { usage = (k.displayName, u) } } } }
-                                .bdButton(.ghost, .small)
-                            Button("Rotate") {
-                                guard confirm("Rotate key?", "The old secret stops working.", destructive: "Rotate") else { return }
-                                Task { if let r = await state.cli("Key rotated", ["api-key", "rotate", k.id, "--json"]) { revealSecret(r) }; await reload() }
+                            Spacer(minLength: 8)
+                            ViewThatFits(in: .horizontal) {
+                                HStack(spacing: 8) { keyActions(k) }
+                                Menu { keyActions(k) } label: { Image(systemName: "ellipsis") }
+                                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
                             }
-                            .bdButton(.secondary, .small).disabled(state.cliPath == nil)
-                            Button("Revoke") {
-                                guard confirm("Revoke key?", "Anything using it will lose access.", destructive: "Revoke") else { return }
-                                Task { await state.cli("Key revoked", ["api-key", "revoke", k.id]); await reload() }
-                            }
-                            .bdButton(.danger, .small).disabled(state.cliPath == nil)
                         }
-                        .padding(.horizontal, 16).padding(.vertical, 11)
-                        Hairline()
+                        .listRow(divider: k.id != keys.last?.id)
                     }
                 }
-                .glassCard(padding: 0)
                 if let usage {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack { Eyebrow(text: "30-day usage · \(usage.0)"); Spacer(); IconButton(icon: "xmark", size: 22) { withAnimation(BD.spring) { self.usage = nil } } }
                         JSONGrid(json: usage.1)
                     }
-                    .frame(width: 320)
-                    .glassCard()
+                    .frame(maxWidth: 340)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
@@ -433,6 +419,21 @@ struct APIKeysView: View {
         if !envName.isEmpty { args += ["--env", envName] }
         if let r = await state.cli("Key created", args), r.exitCode == 0 { revealSecret(r); name = "" }
         await reload()
+    }
+
+    @ViewBuilder func keyActions(_ k: Record) -> some View {
+        Button("Usage") { Task { if let u = try? await state.api.apiKeyUsage(k.id) { withAnimation(BD.spring) { usage = (k.displayName, u) } } } }
+            .bdButton(.ghost, .small)
+        Button("Rotate") {
+            guard confirm("Rotate key?", "The old secret stops working.", destructive: "Rotate") else { return }
+            Task { if let r = await state.cli("Key rotated", ["api-key", "rotate", k.id, "--json"]) { revealSecret(r) }; await reload() }
+        }
+        .bdButton(.secondary, .small).disabled(state.cliPath == nil)
+        Button("Revoke") {
+            guard confirm("Revoke key?", "Anything using it will lose access.", destructive: "Revoke") else { return }
+            Task { await state.cli("Key revoked", ["api-key", "revoke", k.id]); await reload() }
+        }
+        .bdButton(.danger, .small).disabled(state.cliPath == nil)
     }
 
     func scopeText(_ k: Record) -> String? {
