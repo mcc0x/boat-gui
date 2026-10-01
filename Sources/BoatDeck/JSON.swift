@@ -136,6 +136,7 @@ extension Date {
 
 func relative(_ iso: String?) -> String {
     guard let d = Date.fromISO(iso) else { return iso ?? "—" }
+    if abs(d.timeIntervalSinceNow) < 45 { return "just now" }
     let f = RelativeDateTimeFormatter()
     f.unitsStyle = .short
     return f.localizedString(for: d, relativeTo: Date())

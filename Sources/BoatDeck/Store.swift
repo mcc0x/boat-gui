@@ -60,6 +60,14 @@ enum ConnectionStatus: Equatable { case unknown, ok, failed(String) }
 
 @MainActor
 final class AppState: ObservableObject {
+    static let shared = AppState()
+
+    func go(_ s: NavSection) {
+        withAnimation(BD.spring) {
+            if s == .sandboxes && section == .sandboxes { selectedSandbox = nil }
+            section = s
+        }
+    }
     // Connection
     @AppStorage("apiURL") var apiURL: String = "https://boat.dev/api/v1" { didSet { rebuildAPI() } }
     @AppStorage("org") var org: String = "" { didSet { rebuildAPI() } }
@@ -85,7 +93,7 @@ final class AppState: ObservableObject {
     @AppStorage("agent.effort") var agentEffort: String = ""
     @AppStorage("agent.expandTools") var expandTools: Bool = false
 
-    @Published var apiKey: String = "" { didSet { Keychain.set("apiKey", apiKey); rebuildAPI() } }
+    @Published var apiKey: String = "" { didSet { if oldValue != apiKey { Credentials.save(apiKey) }; rebuildAPI() } }
     @Published var section: NavSection = .home
     @Published var sandboxes: [Record] = []
     @Published var loadedOnce = false
@@ -110,7 +118,7 @@ final class AppState: ObservableObject {
     private var lastStates: [String: String] = [:]
 
     init() {
-        let key = Keychain.get("apiKey") ?? ProcessInfo.processInfo.environment["BOAT_API_KEY"] ?? ""
+        let key = Credentials.load() ?? ProcessInfo.processInfo.environment["BOAT_API_KEY"] ?? ""
         api = BoatAPI(baseURL: UserDefaults.standard.string(forKey: "apiURL") ?? "https://boat.dev/api/v1",
                       apiKey: key, org: UserDefaults.standard.string(forKey: "org"))
         apiKey = key
@@ -118,6 +126,18 @@ final class AppState: ObservableObject {
         if let d = UserDefaults.standard.data(forKey: "activity"),
            let a = try? JSONDecoder().decode([ActivityItem].self, from: d) { activity = a }
         relocateCLI()
+        if key.isEmpty {
+            // One-time migration from the Keychain (v1 stored the key there). Off the main thread so a
+            // Keychain access prompt can never freeze the UI.
+            Task.detached {
+                guard let k = Keychain.get("apiKey"), !k.isEmpty else { return }
+                await MainActor.run { [weak self] in
+                    guard let self, self.apiKey.isEmpty else { return }
+                    self.apiKey = k
+                    Task { await self.refreshAll() }
+                }
+            }
+        }
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
         startPolling()
     }
@@ -310,7 +330,10 @@ final class AppState: ObservableObject {
     }
 
     func loadCatalog() async {
-        guard let j = try? await api.providerModels() else { return }
+        guard let j = try? await api.providerModels() else {
+            if catalog.isEmpty { catalog = ["claude-code": [], "codex": []] }
+            return
+        }
         var cat: [String: [String]] = [:]
         var eff: [String: [String]] = [:]
         func models(_ v: JSON) -> [JSON] { v["models"]?.array ?? v.array ?? [] }
@@ -337,6 +360,14 @@ final class AppState: ObservableObject {
 
     var runningCount: Int { sandboxes.filter { $0.isActive }.count }
 
+    /// (running, limit) for concurrently active sandboxes.
+    var concurrency: (Double, Double?) {
+        let l = limits
+        let running = l?["activeSandboxes"]?.double ?? l?["concurrency"]?["running"]?.double ?? Double(runningCount)
+        let limit = l?["maxActiveSandboxes"]?.double ?? l?["currentLimits"]?["activeSandboxes"]?.double ?? l?["concurrency"]?["limit"]?.double
+        return (running, limit)
+    }
+
     var creditHours: Double? {
         if let h = limits?.first("creditBalanceHours")?.double { return h }
         if let s = limits?.first("creditBalanceSeconds")?.double { return s / 3600 }
@@ -358,13 +389,16 @@ extension Record {
     var state: String { self["state", "status"] ?? "unknown" }
     var displayName: String { self["name", "title"] ?? id }
     var stateColor: Color { colorForState(state) }
-    var isActive: Bool { ["ready", "running", "idle", "provisioning", "hydrating", "resuming"].contains(state) }
+    var isActive: Bool { ["ready", "running", "idle", "provisioning", "provisioned", "cloning", "hydrating", "resuming"].contains(state) }
     var isArchived: Bool { ["archived", "stopped", "paused"].contains(state) }
     var machineType: String { self["machineType", "type", "size"] ?? "default" }
     var specs: String {
+        if let c = json["vcpu"]?.int, let m = json["memoryGB"]?.int { return "\(c) vCPU · \(m) GB" }
         switch machineType {
         case "default": return "4 vCPU · 8 GB"
         default: return machineType.capitalized
         }
     }
+    /// When the sandbox will auto-stop (archive), if it has a deadline.
+    var archiveAfter: Date? { Date.fromISO(self["archiveAfter", "expiresAt", "autoStopAt"]) }
 }

@@ -108,7 +108,7 @@ struct SandboxesView: View {
                     ForEach(Array(filtered.enumerated()), id: \.element.id) { i, s in
                         SandboxCard(s: s, large: true)
                             .appear(delay: min(0.3, 0.025 * Double(i)))
-                            .onTapGesture { state.open(sandbox: s.id) }
+                            .tapAction { state.open(sandbox: s.id) }
                             .contextMenu { SandboxQuickActions(id: s.id) }
                     }
                 }
@@ -126,7 +126,7 @@ struct SandboxesView: View {
                     Hairline()
                     ForEach(filtered) { s in
                         SandboxTableRow(s: s)
-                            .onTapGesture { state.open(sandbox: s.id) }
+                            .tapAction { state.open(sandbox: s.id) }
                             .contextMenu { SandboxQuickActions(id: s.id) }
                         Hairline()
                     }
@@ -153,7 +153,7 @@ struct SandboxesView: View {
                 LazyVStack(spacing: 4) {
                     ForEach(filtered) { s in
                         CompactRow(s: s, selected: s.id == state.selectedSandbox)
-                            .onTapGesture { withAnimation(BD.spring) { state.selectedSandbox = s.id } }
+                            .tapAction { withAnimation(BD.spring) { state.selectedSandbox = s.id } }
                             .contextMenu { SandboxQuickActions(id: s.id) }
                     }
                 }
@@ -211,6 +211,9 @@ struct SandboxCard: View {
             HStack(spacing: 6) {
                 Chip(text: s.specs, icon: "cpu")
                 if let e = s["environment", "environmentName"] { Chip(text: e, icon: "leaf") }
+                if s.isActive, let d = s.archiveAfter, d > Date() {
+                    Chip(text: "stops " + d.formatted(.relative(presentation: .named, unitsStyle: .narrow)), icon: "hourglass")
+                }
                 Spacer(minLength: 0)
             }
             if large {
@@ -283,10 +286,14 @@ struct SandboxQuickActions: View {
         Button("Resume") { Task { await state.run("Resuming") { try await $0.resume(id) } } }
         Button("Fork") { Task { await state.run("Forked") { try await $0.fork(id) } } }
         Button("Extend 1 hour") {
-            Task { await state.run("Extended by 1h") { api in
-                let cur = try await api.sandbox(id)["ttlSeconds"]?.double ?? 3600
-                return try await api.updateSandbox(id, ["ttlSeconds": .number(cur + 3600)])
-            } }
+            Task {
+                let left = max(0, state.sandboxes.first { $0.id == id }?.archiveAfter?.timeIntervalSinceNow ?? 0)
+                let ttl = Int(left + 3600)
+                await state.runOrCLI("Extended by 1h", cli: ["extend", id, "--hours", "1"]) {
+                    try await $0.updateSandbox(id, ["ttlSeconds": .number(Double(ttl))])
+                }
+                await state.refreshSandboxes(silent: true)
+            }
         }
         Button("Save Named Snapshot…") {
             if let n = promptText("Snapshot name", "Named snapshots can seed new sandboxes.") {
@@ -354,10 +361,8 @@ struct NewSandboxSheet: View {
                         VStack(alignment: .leading, spacing: 10) {
                             Toggle("Keep running — no auto-stop", isOn: $noAutoStop.animation(BD.spring)).toggleStyle(.switch)
                             if !noAutoStop {
-                                HStack {
-                                    Slider(value: $ttlHours, in: 0.25...24, step: 0.25)
-                                    Text(durationText(ttlHours * 3600)).font(.bdMono).foregroundStyle(BD.text).frame(width: 70, alignment: .trailing)
-                                }
+                                DurationChips(hours: $ttlHours)
+                                    .transition(.opacity)
                             }
                         }
                     }

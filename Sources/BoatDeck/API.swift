@@ -4,6 +4,11 @@ struct BoatError: LocalizedError {
     let status: Int
     let code: String?
     let message: String
+    var json: JSON? = nil
+    /// e.g. a link to the dashboard page that fixes the problem.
+    var setupURL: URL? {
+        (json?["error"]?["details"]?["setupUrl"]?.string ?? json?["details"]?["setupUrl"]?.string).flatMap(URL.init(string:))
+    }
     var errorDescription: String? {
         var s = message
         if let code { s = "\(code): \(s)" }
@@ -68,8 +73,9 @@ final class BoatAPI: @unchecked Sendable {
         if status >= 400 || json?["ok"]?.bool == false {
             throw BoatError(status: status,
                             code: json?["code"]?.string,
-                            message: json?.first("message", "error")?.string
-                                ?? String(decoding: data.prefix(500), as: UTF8.self))
+                            message: json?["message"]?.string ?? json?["error"]?["message"]?.string
+                                ?? String(decoding: data.prefix(500), as: UTF8.self),
+                            json: json)
         }
         return json ?? .object(["raw": .string(String(decoding: data, as: UTF8.self))])
     }
@@ -103,7 +109,9 @@ final class BoatAPI: @unchecked Sendable {
                         let j = JSON.parse(Data(buf.utf8))
                         throw BoatError(status: status, code: j?["code"]?.string, message: j?["message"]?.string ?? buf)
                     }
+                    var traced = 0
                     for try await line in bytes.lines {
+                        if traced < 40 { traced += 1; Trace.log(method, (req.url?.absoluteString ?? path) + " [stream]", status, JSON.parse(Data(line.utf8)), Data(line.utf8)) }
                         let t = line.trimmingCharacters(in: .whitespaces)
                         if t.isEmpty { continue }
                         let payload = t.hasPrefix("data:") ? String(t.dropFirst(5)).trimmingCharacters(in: .whitespaces) : t
@@ -279,11 +287,13 @@ func shq(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "'
 
 /// Optional developer trace of API traffic (secrets redacted). Enabled in Settings › Advanced.
 enum Trace {
-    static var enabled: Bool {
-        UserDefaults.standard.bool(forKey: "debugTrace")
-            || FileManager.default.fileExists(atPath: dir.appendingPathComponent(".trace").path)
+    static var enabled: Bool { UserDefaults.standard.bool(forKey: "debugTrace") }
+    /// ~/Library/Logs/BoatDeck — no privacy prompt needed (unlike ~/Documents).
+    static var dir: URL {
+        let d = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/BoatDeck")
+        try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
+        return d
     }
-    static var dir: URL { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Documents/BoatDeck") }
     static let sensitive: Set<String> = ["value", "secret", "token", "signingSecret", "contents", "content",
                                          "apiKey", "password", "privateKey", "url_token", "key_secret"]
 

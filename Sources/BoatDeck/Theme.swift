@@ -3,7 +3,28 @@ import AppKit
 
 // Property-wrapper aliases. On the macOS 27 SDK `@State` & friends are macros whose plugin ships only
 // with full Xcode; going through a typealias uses the plain property wrapper so Command Line Tools suffice.
-typealias VState = SwiftUI.State
+//
+// `VState` is our own @State replacement backed by @StateObject: plain `SwiftUI.State` used through a typealias
+// compiles on this SDK but its writes don't take effect without the macro expansion.
+@propertyWrapper
+struct VState<Value>: DynamicProperty {
+    final class Box: ObservableObject {
+        @Published var value: Value
+        init(_ v: Value) { value = v }
+    }
+    @StateObject private var box: Box
+
+    init(wrappedValue: Value) { _box = StateObject(wrappedValue: Box(wrappedValue)) }
+
+    var wrappedValue: Value {
+        get { box.value }
+        nonmutating set { box.value = newValue }
+    }
+    var projectedValue: Binding<Value> {
+        let b = box
+        return Binding(get: { b.value }, set: { b.value = $0 })
+    }
+}
 typealias VNamespace = SwiftUI.Namespace
 typealias VFocusState = SwiftUI.FocusState
 
@@ -82,15 +103,15 @@ enum Density: String, CaseIterable, Identifiable {
 
 /// UI preferences read throughout the views.
 final class UIPrefs: ObservableObject {
-    @AppStorage("ui.theme") var theme: ThemeChoice = .dark { didSet { apply(); objectWillChange.send() } }
-    @AppStorage("ui.accent") var accent: AccentChoice = .mono { didSet { objectWillChange.send() } }
-    @AppStorage("ui.glass") var glass: Bool = true { didSet { objectWillChange.send() } }
-    @AppStorage("ui.ambient") var ambient: Bool = true { didSet { objectWillChange.send() } }
-    @AppStorage("ui.motion") var motion: Bool = true { didSet { objectWillChange.send() } }
-    @AppStorage("ui.density") var density: Density = .comfortable { didSet { objectWillChange.send() } }
-    @AppStorage("ui.sidebarCollapsed") var sidebarCollapsed: Bool = false { didSet { objectWillChange.send() } }
-    @AppStorage("ui.sandboxLayout") var sandboxLayout: String = "grid" { didSet { objectWillChange.send() } }
-    @AppStorage("ui.menuBar") var showMenuBar: Bool = true { didSet { objectWillChange.send() } }
+    @AppStorage("ui.theme") var theme: ThemeChoice = .dark { didSet { apply() } }
+    @AppStorage("ui.accent") var accent: AccentChoice = .mono
+    @AppStorage("ui.glass") var glass: Bool = true
+    @AppStorage("ui.ambient") var ambient: Bool = true
+    @AppStorage("ui.motion") var motion: Bool = true
+    @AppStorage("ui.density") var density: Density = .comfortable
+    @AppStorage("ui.sidebarCollapsed") var sidebarCollapsed: Bool = false
+    @AppStorage("ui.sandboxLayout") var sandboxLayout: String = "grid"
+    @AppStorage("ui.menuBar") var showMenuBar: Bool = true
 
     static let shared = UIPrefs()
     func apply() { NSApp?.appearance = theme.nsAppearance }
@@ -193,12 +214,13 @@ struct AppearIn: ViewModifier {
 struct AmbientBackground: View {
     @EnvironmentObject var prefs: UIPrefs
     @Environment(\.colorScheme) var scheme
+    @Environment(\.controlActiveState) private var active
 
     var body: some View {
         ZStack {
             BD.bg
             if prefs.ambient {
-                TimelineView(.animation(minimumInterval: 1 / 20, paused: !prefs.motion)) { tl in
+                TimelineView(.animation(minimumInterval: 1 / 12, paused: !prefs.motion || active == .inactive)) { tl in
                     let t = tl.date.timeIntervalSinceReferenceDate
                     Canvas { ctx, size in
                         let blobs: [(Double, Double, Double, Double)] = [

@@ -130,11 +130,13 @@ struct OverviewTab: View {
     let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var created: Date? { Date.fromISO(detail?.first("createdAt")?.string) }
-    var ttl: Double? { detail?.first("ttlSeconds")?.double }
-    var remaining: Double? {
-        guard let ttl, ttl > 0, let created else { return nil }
-        if let exp = Date.fromISO(detail?.first("expiresAt", "stopsAt", "autoStopAt")?.string) { return exp.timeIntervalSince(now) }
-        return created.addingTimeInterval(ttl).timeIntervalSince(now)
+    var deadline: Date? { Date.fromISO(detail?.first("archiveAfter", "expiresAt", "autoStopAt")?.string) }
+    var neverStops: Bool { detail?["noAutoStop"]?.bool == true || (detail != nil && deadline == nil && detail?["ttlSeconds"]?.double ?? 1 <= 0) }
+    var remaining: Double? { deadline.map { $0.timeIntervalSince(now) } }
+    /// Whole lifetime window, for the ring (deadline − creation, at least an hour).
+    var window: Double {
+        guard let d = deadline, let c = created else { return 3600 }
+        return max(d.timeIntervalSince(c), remaining ?? 0, 60)
     }
 
     var body: some View {
@@ -149,12 +151,15 @@ struct OverviewTab: View {
 
                 VStack(alignment: .leading, spacing: 12) {
                     Eyebrow(text: "Quick actions")
-                    HStack(spacing: 8) {
+                    ScrollView(.horizontal, showsIndicators: false) { HStack(spacing: 8) {
+                        if let u = detail?["url"]?.string, let url = URL(string: u) {
+                            Button { NSWorkspace.shared.open(url) } label: { Label("Open URL", systemImage: "safari") }.bdButton(.primary)
+                        }
                         Button { rename() } label: { Label("Rename", systemImage: "pencil") }.bdButton()
                         Button { Task { await extend(3600) } } label: { Label("+1 hour", systemImage: "clock.arrow.circlepath") }.bdButton()
                         Button { Task { await extend(4 * 3600) } } label: { Label("+4 hours", systemImage: "clock.badge.plus") }.bdButton()
                         Button {
-                            Task { await state.run("Auto-stop disabled") { try await $0.updateSandbox(id, ["ttlSeconds": 0, "noAutoStop": true]) }; await load() }
+                            Task { await state.runOrCLI("Auto-stop disabled", cli: ["extend", id, "--no-auto-stop"]) { try await $0.updateSandbox(id, ["noAutoStop": true, "ttlSeconds": 0]) }; await load() }
                         } label: { Label("Keep running", systemImage: "infinity") }.bdButton()
                         Button { Task { await state.run("Forked") { try await $0.fork(id) } } } label: { Label("Fork", systemImage: "arrow.triangle.branch") }.bdButton()
                         Button {
@@ -163,7 +168,7 @@ struct OverviewTab: View {
                             }
                         } label: { Label("Snapshot", systemImage: "camera") }.bdButton()
                         Button { Task { await downloadArtifacts() } } label: { Label("Artifacts", systemImage: "arrow.down.doc") }.bdButton()
-                    }
+                    }.padding(1) }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .glassCard()
@@ -185,12 +190,12 @@ struct OverviewTab: View {
 
     var lifetimeCard: some View {
         let frac: Double = {
-            guard let r = remaining, let t = ttl, t > 0 else { return 1 }
-            return max(0, min(1, r / t))
+            guard let r = remaining else { return 1 }
+            return max(0, min(1, r / window))
         }()
         return HStack(spacing: 14) {
             RingGauge(value: frac, lineWidth: 7, color: frac < 0.15 ? BD.amber : BD.text).frame(width: 64, height: 64)
-                .overlay(Image(systemName: ttl ?? 1 <= 0 ? "infinity" : "hourglass").font(.system(size: 14)).foregroundStyle(BD.text2))
+                .overlay(Image(systemName: neverStops ? "infinity" : "hourglass").font(.system(size: 14)).foregroundStyle(BD.text2))
             VStack(alignment: .leading, spacing: 4) {
                 Eyebrow(text: "Auto-stop")
                 Text(remainingText).font(.system(size: 22, weight: .semibold, design: .rounded).monospacedDigit()).foregroundStyle(BD.text)
@@ -204,16 +209,17 @@ struct OverviewTab: View {
     }
 
     var remainingText: String {
-        if let t = ttl, t <= 0 { return "Never" }
-        if detail?["noAutoStop"]?.bool == true { return "Never" }
-        guard let r = remaining else { return ttl.map { durationText($0) } ?? "—" }
+        if neverStops { return "Never" }
+        guard let r = remaining else { return "—" }
         if r <= 0 { return "Stopping" }
         let h = Int(r) / 3600, m = (Int(r) % 3600) / 60, s = Int(r) % 60
         return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%02d:%02d", m, s)
     }
     var uptimeText: String {
         guard let created else { return "uptime —" }
-        return "created \(durationText(now.timeIntervalSince(created))) ago"
+        let up = "up \(durationText(now.timeIntervalSince(created)))"
+        if let d = deadline { return up + " · stops at " + d.formatted(date: .omitted, time: .shortened) }
+        return up
     }
 
     var usageCard: some View {
@@ -244,10 +250,20 @@ struct OverviewTab: View {
 
     var machineCard: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Eyebrow(text: "Machine").padding(.bottom, 4)
-            KVRow(key: "Type", value: detail?.first("machineType", "type")?.string ?? "default")
-            KVRow(key: "IP", value: detail?.first("machineIp", "ip")?.string, mono: true)
-            KVRow(key: "Snapshot", value: detail?.first("snapshotId")?.string, mono: true)
+            HStack {
+                Eyebrow(text: "Machine")
+                Spacer()
+                if let h = detail?["health"]?.string {
+                    HStack(spacing: 4) {
+                        Circle().fill(h == "ok" ? BD.green : BD.amber).frame(width: 6, height: 6)
+                        Text("health \(h)").font(.system(size: 10.5)).foregroundStyle(BD.text3)
+                    }
+                }
+            }
+            .padding(.bottom, 4)
+            KVRow(key: "Size", value: [detail?["type"]?.string?.capitalized, detail.map { Record(json: $0).specs }].compactMap { $0 }.joined(separator: " · "))
+            KVRow(key: "SSH", value: detail?["sshEndpoint"]?.string, copy: true)
+            KVRow(key: "Billing", value: detail?["billingMultiplier"]?.double.map { "\(String(format: "%g", $0))× rate" })
         }
         .frame(maxWidth: .infinity, minHeight: 96, alignment: .leading)
         .glassCard()
@@ -264,8 +280,11 @@ struct OverviewTab: View {
     }
 
     func extend(_ secs: Double) async {
-        let cur = detail?["ttlSeconds"]?.double ?? 3600
-        await state.run("Extended by \(durationText(secs))") { try await $0.updateSandbox(id, ["ttlSeconds": .number(cur + secs)]) }
+        // New lifetime measured from now: whatever is left plus the extension.
+        let ttl = max(0, remaining ?? 0) + secs
+        await state.runOrCLI("Extended by \(durationText(secs))", cli: ["extend", id, "--ttl", "\(Int(ttl))"]) {
+            try await $0.updateSandbox(id, ["ttlSeconds": .number(ttl.rounded())])
+        }
         await load()
     }
 
@@ -454,6 +473,7 @@ struct SandboxSnapshotsTab: View {
                                     Text(relative(s["createdAt"])).font(.system(size: 13, weight: .medium)).foregroundStyle(BD.text)
                                     if i == 0 { Chip(text: "latest") }
                                     if s.json["named"]?.bool == true { Chip(text: "named", icon: "tag") }
+                                    if let k = s["kind"] { Chip(text: k == "base" ? "full" : k) }
                                     Spacer()
                                     Text(byteString(s.json.first("sizeBytes", "size")?.double)).font(.bdSmall.monospacedDigit()).foregroundStyle(BD.text2)
                                 }

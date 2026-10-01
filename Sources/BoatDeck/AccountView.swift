@@ -1,5 +1,4 @@
 import SwiftUI
-import Charts
 
 struct AccountView: View {
     @EnvironmentObject var state: AppState
@@ -39,6 +38,7 @@ struct AccountView: View {
                 }
                 .toggleStyle(.switch)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .glassCard()
             .appear(delay: 0.15)
         }
@@ -56,7 +56,13 @@ struct AccountView: View {
                 }
             }
             Hairline()
-            JSONGrid(json: u, skip: ["ok", "type", "name"])
+            KVRow(key: "Plan", value: u.first("accountPlan", "plan")?.string?.capitalized)
+            KVRow(key: "Status", value: u.first("accountStatus", "status")?.string?.capitalized)
+            KVRow(key: "Sign-in", value: u.first("connectionMethod")?.string?.capitalized)
+            KVRow(key: "Account ID", value: u.first("id")?.string, copy: true)
+            DisclosureGroup {
+                JSONGrid(json: .object((u.object ?? [:]).filter { $0.value != .null }), skip: ["ok", "type"]).padding(.top, 6)
+            } label: { Text("All fields").font(.bdSmall).foregroundStyle(BD.text3) }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .glassCard()
@@ -64,9 +70,8 @@ struct AccountView: View {
 
     var balanceCard: some View {
         let hours = state.creditHours
-        let conc = state.limits?["concurrency"]
-        let running = conc?["running"]?.double ?? Double(state.runningCount)
-        let limit = conc?["limit"]?.double ?? 0
+        let running = state.concurrency.0
+        let limit = state.concurrency.1 ?? 0
         return VStack(alignment: .leading, spacing: 16) {
             Eyebrow(text: "Balance")
             HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -94,38 +99,50 @@ struct AccountView: View {
                         })
                 }
             }
+            if state.limits?["canStart"]?.bool == false {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.circle").foregroundStyle(BD.amber)
+                    Text("New sandboxes are blocked until you pick a plan or add credit.").font(.bdSmall).foregroundStyle(BD.text2)
+                    Spacer(minLength: 0)
+                    Link(destination: URL(string: "https://boat.dev/pricing")!) { Text("Choose plan") }.buttonStyle(BDButtonStyle(kind: .primary, size: .small))
+                }
+                .panel(padding: 10)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .glassCard()
     }
 
-    struct Bar: Identifiable { let id: String; let kind: String; let value: Double }
-
     func limitsCard(_ starts: [String: JSON]) -> some View {
-        let order = ["minute", "hour", "day"]
-        let keys = starts.keys.sorted { (order.firstIndex(of: $0) ?? 9) < (order.firstIndex(of: $1) ?? 9) }
-        let bars: [Bar] = keys.flatMap { k -> [Bar] in
-            let lim = starts[k]?["limit"]?.double ?? 0, rem = starts[k]?["remaining"]?.double ?? 0
-            return [Bar(id: k + "u", kind: "Used", value: max(0, lim - rem)), Bar(id: k + "r", kind: "Remaining", value: rem)]
-        }
-        return VStack(alignment: .leading, spacing: 12) {
-            Eyebrow(text: "Start rate limits")
-            HStack(alignment: .center, spacing: 24) {
+        let order = ["minute", "hour", "day", "week", "month"]
+        let keys = starts.keys.filter { starts[$0]?["limit"]?.double != nil }
+            .sorted { (order.firstIndex(of: $0) ?? 9) < (order.firstIndex(of: $1) ?? 9) }
+        return VStack(alignment: .leading, spacing: 14) {
+            Eyebrow(text: "Sandbox start limits")
+            HStack(alignment: .top, spacing: 14) {
                 ForEach(keys, id: \.self) { k in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("\(starts[k]?["remaining"]?.string ?? "?")").font(.system(size: 22, weight: .semibold, design: .rounded)).foregroundStyle(BD.text)
-                        Text("of \(starts[k]?["limit"]?.string ?? "?") per \(k)").font(.bdSmall).foregroundStyle(BD.text3)
+                    let lim = starts[k]?["limit"]?.double ?? 0
+                    let rem = starts[k]?["remaining"]?.double ?? 0
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(alignment: .firstTextBaseline, spacing: 4) {
+                            Text("\(Int(rem))").font(.system(size: 22, weight: .semibold, design: .rounded)).foregroundStyle(BD.text)
+                            Text("/ \(Int(lim))").font(.bdSmall).foregroundStyle(BD.text3)
+                        }
+                        GeometryReader { g in
+                            ZStack(alignment: .leading) {
+                                Capsule().fill(BD.surfaceHi)
+                                Capsule().fill(BD.text).frame(width: g.size.width * (lim > 0 ? rem / lim : 0))
+                            }
+                        }
+                        .frame(height: 5)
+                        Text("left this \(k)").font(.bdSmall).foregroundStyle(BD.text3)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .panel()
                 }
-                Chart(bars) { b in
-                    BarMark(x: .value("Starts", b.value), y: .value("Window", String(b.id.dropLast())))
-                        .foregroundStyle(by: .value("Kind", b.kind))
-                        .cornerRadius(3)
-                }
-                .chartForegroundStyleScale(["Used": BD.text, "Remaining": BD.surfaceHi])
-                .chartLegend(position: .bottom, alignment: .leading)
-                .chartXAxis(.hidden)
-                .frame(height: 90)
+            }
+            if starts.keys.contains(where: { starts[$0]?["limit"]?.double == nil }) {
+                Text("No limit on longer windows.").font(.bdSmall).foregroundStyle(BD.text3)
             }
         }
         .glassCard()

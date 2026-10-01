@@ -25,7 +25,6 @@ struct RootView: View {
             }
         }
         .overlay(alignment: .bottomTrailing) { ToastOverlay() }
-        .background(WindowChrome())
         .animation(BD.spring, value: state.hasKey)
         .animation(BD.snappy, value: state.showPalette)
         .task { await state.refreshAll() }
@@ -230,9 +229,8 @@ struct CreditCard: View {
     @EnvironmentObject var state: AppState
     var body: some View {
         let hours = state.creditHours
-        let conc = state.limits?["concurrency"]
-        let running = conc?["running"]?.double ?? Double(state.runningCount)
-        let limit = conc?["limit"]?.double
+        let running = state.concurrency.0
+        let limit = state.concurrency.1
         HStack(spacing: 12) {
             RingGauge(value: limit.map { running / max(1, $0) } ?? 0, lineWidth: 4, color: BD.text)
                 .frame(width: 30, height: 30)
@@ -249,7 +247,7 @@ struct CreditCard: View {
         .padding(10)
         .background(BD.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(BD.stroke, lineWidth: 1))
-        .onTapGesture { withAnimation(BD.spring) { state.section = .account } }
+        .tapAction { withAnimation(BD.spring) { state.section = .account } }
     }
 }
 

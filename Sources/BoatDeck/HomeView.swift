@@ -18,13 +18,13 @@ struct HomeView: View {
 
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: 4), spacing: 14) {
                 StatTile(title: "Active", value: "\(state.runningCount)",
-                         sub: "\(state.sandboxes.count) sandboxes total", icon: "shippingbox",
+                         sub: state.concurrency.1.map { "of \(Int($0)) allowed at once" } ?? "\(state.sandboxes.count) sandboxes total", icon: "shippingbox",
                          ring: concurrencyRatio, ringColor: BD.green)
                     .appear(delay: 0.03)
                 StatTile(title: "Credit", value: state.creditHours.map { String(format: "%.1fh", $0) } ?? "—",
                          sub: packText, icon: "clock")
                     .appear(delay: 0.06)
-                StatTile(title: "Starts today", value: startsText, sub: "rate limit remaining", icon: "bolt",
+                StatTile(title: "Starts left", value: startsText, sub: startsSub, icon: "bolt",
                          ring: startsRatio, ringColor: BD.text)
                     .appear(delay: 0.09)
                 StatTile(title: "Environments", value: "\(state.environments.count)",
@@ -50,7 +50,7 @@ struct HomeView: View {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 250), spacing: 12)], spacing: 12) {
                             ForEach(Array(recent.enumerated()), id: \.element.id) { i, s in
                                 SandboxCard(s: s).appear(delay: 0.03 * Double(i))
-                                    .onTapGesture { state.open(sandbox: s.id) }
+                                    .tapAction { state.open(sandbox: s.id) }
                             }
                         }
                     }
@@ -72,12 +72,16 @@ struct HomeView: View {
         Array(state.sandboxes.sorted { ($0["createdAt"] ?? "") > ($1["createdAt"] ?? "") }.prefix(6))
     }
     var concurrencyRatio: Double? {
-        guard let c = state.limits?["concurrency"], let l = c["limit"]?.double, l > 0 else { return nil }
-        return (c["running"]?.double ?? Double(state.runningCount)) / l
+        guard let l = state.concurrency.1, l > 0 else { return nil }
+        return state.concurrency.0 / l
     }
     var startsText: String {
         guard let d = state.limits?["starts"]?["day"] else { return "—" }
         return d["remaining"]?.string ?? "—"
+    }
+    var startsSub: String {
+        guard let l = state.limits?["starts"]?["day"]?["limit"]?.string else { return "today" }
+        return "of \(l) today"
     }
     var startsRatio: Double? {
         guard let d = state.limits?["starts"]?["day"], let l = d["limit"]?.double, l > 0 else { return nil }
@@ -131,17 +135,19 @@ struct HeroBanner: View {
 /// Animated line-wave field used as hero art.
 struct WaveField: View {
     @EnvironmentObject var prefs: UIPrefs
+    @Environment(\.controlActiveState) private var active
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1 / 30, paused: !prefs.motion)) { tl in
+        // Animates only while the window is active, at a modest frame rate, to keep CPU/battery use low.
+        TimelineView(.animation(minimumInterval: 1 / 20, paused: !prefs.motion || active == .inactive)) { tl in
             let t = tl.date.timeIntervalSinceReferenceDate
             Canvas { ctx, size in
-                let lines = 14
+                let lines = 10
                 for i in 0..<lines {
                     var p = Path()
                     let base = size.height * (0.25 + 0.6 * Double(i) / Double(lines))
                     let amp = 6 + Double(i) * 1.4
                     let phase = t * (0.35 + Double(i) * 0.02) + Double(i) * 0.5
-                    stride(from: 0.0, through: Double(size.width), by: 6).forEach { x in
+                    stride(from: 0.0, through: Double(size.width), by: 12).forEach { x in
                         let y = base + sin(x / 90 + phase) * amp + sin(x / 37 - phase * 0.7) * amp * 0.25
                         if x == 0 { p.move(to: CGPoint(x: x, y: y)) } else { p.addLine(to: CGPoint(x: x, y: y)) }
                     }
@@ -245,7 +251,7 @@ struct ActivityCard: View {
                         }
                         .frame(minHeight: 38, alignment: .top)
                         .contentShape(Rectangle())
-                        .onTapGesture { state.open(sandbox: a.sandboxId) }
+                        .tapAction { state.open(sandbox: a.sandboxId) }
                         .transition(.move(edge: .top).combined(with: .opacity))
                     }
                 }

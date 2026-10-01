@@ -75,8 +75,8 @@ struct TerminalView: View {
                                 case .cmd:
                                     (Text("❯ ").foregroundColor(BD.green) + Text(l.text).foregroundColor(.white).bold())
                                         .padding(.top, 8)
-                                case .out: Text(l.text).foregroundColor(Color.white.opacity(0.88))
-                                case .err: Text(l.text).foregroundColor(BD.red.opacity(0.9))
+                                case .out: Text(l.text.hasSuffix("\n") ? String(l.text.dropLast()) : l.text).foregroundColor(Color.white.opacity(0.88))
+                                case .err: Text(l.text.hasSuffix("\n") ? String(l.text.dropLast()) : l.text).foregroundColor(BD.red.opacity(0.9))
                                 case .meta: Text(l.text).foregroundColor(Color.white.opacity(0.4))
                                 }
                             }
@@ -116,6 +116,14 @@ struct TerminalView: View {
                 if running {
                     Button("Stop") { task?.cancel(); running = false; lines.append(TermLine(kind: .meta, text: "^C (stopped watching)")) }
                         .bdButton(.danger, .small)
+                } else {
+                    Button { runIt() } label: {
+                        Image(systemName: "return").font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(command.isEmpty ? .white.opacity(0.3) : .black)
+                            .frame(width: 26, height: 22)
+                            .background(command.isEmpty ? Color.white.opacity(0.08) : BD.green, in: RoundedRectangle(cornerRadius: 6))
+                    }
+                    .buttonStyle(.plain).help("Run (↩)").disabled(command.isEmpty)
                 }
             }
             .padding(.horizontal, 14).padding(.vertical, 11)
@@ -162,10 +170,11 @@ struct TerminalView: View {
         let clean = stripANSI(s)
         guard !clean.isEmpty else { return }
         let kind: TermLine.Kind = err ? .err : .out
-        if let last = lines.last, last.kind == kind, !last.text.hasSuffix("\n"), clean.count < 4000 {
+        // Stored text keeps its newlines; a chunk continues the previous line only if that line is unterminated.
+        if let last = lines.last, last.kind == kind, !last.text.hasSuffix("\n"), last.text.count < 20000 {
             lines[lines.count - 1].text += clean
         } else {
-            lines.append(TermLine(kind: kind, text: clean.hasSuffix("\n") ? String(clean.dropLast()) : clean))
+            lines.append(TermLine(kind: kind, text: clean))
         }
     }
 

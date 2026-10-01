@@ -27,6 +27,8 @@ private struct BDButtonBody: View {
         configuration.label
             .font(.system(size: size == .small ? 11.5 : 12.5, weight: .medium))
             .labelStyle(TightLabel())
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
             .padding(.horizontal, size == .small ? 10 : 14)
             .frame(height: h)
             .foregroundStyle(fg)
@@ -563,5 +565,39 @@ func colorForState(_ s: String) -> Color {
     case "archived", "stopped", "paused": return BD.text3
     case "error", "failed": return BD.red
     default: return BD.text3
+    }
+}
+
+/// Preset lifetimes as tappable chips (replaces a long ticked slider).
+struct DurationChips: View {
+    @Binding var hours: Double
+    let options: [Double] = [0.25, 0.5, 1, 2, 4, 8, 12, 24]
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(options, id: \.self) { h in
+                let on = abs(hours - h) < 0.01
+                Button { withAnimation(BD.snappy) { hours = h } } label: {
+                    Text(h < 1 ? "\(Int(h * 60))m" : "\(Int(h))h")
+                        .font(.system(size: 11.5, weight: .medium).monospacedDigit())
+                        .fixedSize()
+                        .foregroundStyle(on ? BD.inverse : BD.text2)
+                        .padding(.horizontal, 10).frame(height: 26)
+                        .background(on ? AnyShapeStyle(BD.text) : AnyShapeStyle(BD.surface), in: Capsule())
+                        .overlay(Capsule().strokeBorder(on ? Color.clear : BD.stroke, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+}
+
+extension View {
+    /// Tap handler that is also exposed to accessibility (VoiceOver / automation) as a button press.
+    func tapAction(_ action: @escaping () -> Void) -> some View {
+        self.contentShape(Rectangle())
+            .onTapGesture(perform: action)
+            .accessibilityElement(children: .contain)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction(.default, action)
     }
 }

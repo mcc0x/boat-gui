@@ -85,7 +85,6 @@ struct SettingsView: View {
         }
         .frame(width: 780, height: 560)
         .background(AmbientBackground())
-        .background(WindowChrome())
     }
 }
 
@@ -151,10 +150,7 @@ struct GeneralPane: View {
         }
         SettingsGroup(title: "Behavior") {
             SettingsRow(title: "Refresh interval", sub: "How often sandbox states are polled.", icon: "arrow.clockwise") {
-                HStack {
-                    Slider(value: $state.refreshSeconds, in: 3...120, step: 1).frame(width: 150)
-                    Text("\(Int(state.refreshSeconds))s").font(.bdMono).foregroundStyle(BD.text2).frame(width: 36)
-                }
+                PillPicker(options: [5.0, 10, 30, 60].map { PillOption(value: $0, label: "\(Int($0))s") }, selection: $state.refreshSeconds)
             }
             SettingsRow(title: "Skip confirmations", sub: "Don't ask before rotate / revoke. Deletes always ask.", icon: "checkmark.shield", last: true) {
                 Toggle("", isOn: $state.skipConfirm).toggleStyle(.switch).labelsHidden()
@@ -186,7 +182,7 @@ struct AccountPane: View {
             }
             SettingsRow(title: "Replace key", icon: "arrow.triangle.2.circlepath", last: true) {
                 HStack {
-                    Field(placeholder: "boat_…", text: $key, mono: true, secure: true).frame(width: 220)
+                    Field(placeholder: "boat_…", text: $key, mono: true, secure: true).frame(width: 180)
                     Button("Save") { state.apiKey = key.trimmingCharacters(in: .whitespacesAndNewlines); key = ""; Task { await state.refreshAll(); await state.testConnection() } }
                         .bdButton(.primary, .small).disabled(key.isEmpty)
                 }
@@ -201,9 +197,9 @@ struct AccountPane: View {
             }
         }
         SettingsGroup {
-            SettingsRow(title: "Sign out", sub: "Removes the API key from this Mac's Keychain.", icon: "rectangle.portrait.and.arrow.right", last: true) {
+            SettingsRow(title: "Sign out", sub: "Removes the saved API key from this Mac.", icon: "rectangle.portrait.and.arrow.right", last: true) {
                 Button("Sign out") {
-                    if confirm("Sign out?", "Your API key will be removed from the Keychain.", destructive: "Sign out") { state.apiKey = "" }
+                    if confirm("Sign out?", "Your saved API key will be removed from this Mac.", destructive: "Sign out") { state.apiKey = "" }
                 }
                 .bdButton(.danger, .small)
             }
@@ -287,12 +283,13 @@ struct ThemeThumb: View {
         let dark = Color(white: 0.07), light = Color(white: 0.96)
         ZStack {
             if theme == .system {
-                HStack(spacing: 0) { thumb(dark, .white); thumb(light, .black) }
+                thumb(light, .black)
+                thumb(dark, .white).mask(Rectangle().frame(width: 80).frame(maxWidth: .infinity, alignment: .leading))
             } else {
                 thumb(theme == .dark ? dark : light, theme == .dark ? .white : .black)
             }
         }
-        .frame(width: 150, height: 92)
+        .frame(width: 160, height: 92)
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
     func thumb(_ bg: Color, _ fg: Color) -> some View {
@@ -319,11 +316,13 @@ struct SandboxDefaultsPane: View {
                 PillPicker(options: [PillOption(value: "small", label: "Small"), PillOption(value: "default", label: "Default"),
                                      PillOption(value: "large", label: "Large")], selection: $state.defaultType)
             }
-            SettingsRow(title: "Auto-stop after", icon: "hourglass") {
-                HStack {
-                    Slider(value: $state.defaultTTLHours, in: 0.25...24, step: 0.25).frame(width: 150)
-                    Text(durationText(state.defaultTTLHours * 3600)).font(.bdMono).foregroundStyle(BD.text2).frame(width: 60)
+            SettingsRow(title: "Auto-stop after", sub: "Sandboxes stop (and snapshot) themselves after this long.", icon: "hourglass") {
+                Picker("", selection: $state.defaultTTLHours) {
+                    ForEach([0.25, 0.5, 1, 2, 4, 8, 12, 24], id: \.self) { h in
+                        Text(h < 1 ? "\(Int(h * 60)) minutes" : "\(Int(h)) hour\(h == 1 ? "" : "s")").tag(h)
+                    }
                 }
+                .labelsHidden().frame(width: 150)
             }
             SettingsRow(title: "Environment", icon: "leaf") {
                 Picker("", selection: $state.defaultEnvironment) {
@@ -434,7 +433,7 @@ struct AdvancedPane: View {
     @AppStorage("debugTrace") private var trace = false
     var body: some View {
         SettingsGroup(title: "Diagnostics") {
-            SettingsRow(title: "Log API traffic", sub: "Writes responses (secrets redacted) to Documents/BoatDeck/api-trace.log.", icon: "doc.text.magnifyingglass") {
+            SettingsRow(title: "Log API traffic", sub: "Writes responses (secrets redacted) to ~/Library/Logs/BoatDeck/api-trace.log.", icon: "doc.text.magnifyingglass") {
                 Toggle("", isOn: $trace).toggleStyle(.switch).labelsHidden()
             }
             SettingsRow(title: "Reveal log", icon: "folder", last: true) {

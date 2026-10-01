@@ -50,7 +50,7 @@ struct SnapshotsView: View {
                                 Image(systemName: "camera.aperture").foregroundStyle(BD.text2)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(s.id).font(.bdMono).foregroundStyle(BD.text).lineLimit(1)
-                                    Text("from \(s["sandboxId"] ?? "—") · \(relative(s["createdAt"]))").font(.bdSmall).foregroundStyle(BD.text3)
+                                    Text([s["kind"].map { $0 == "base" ? "full image" : $0 }, "from \(s["sandboxId"] ?? "—")", s.json["fileCount"]?.int.map { "\($0) files" }, relative(s["createdAt"])].compactMap { $0 }.joined(separator: " · ")).font(.bdSmall).foregroundStyle(BD.text3)
                                 }
                                 Spacer()
                                 Text(byteString(s.json.first("sizeBytes", "size")?.double)).font(.bdSmall.monospacedDigit()).foregroundStyle(BD.text2)
@@ -331,10 +331,10 @@ struct APIKeysView: View {
                     Field(placeholder: "Only sandbox id", text: $sandbox, mono: true).frame(width: 160)
                     Field(placeholder: "Only env", text: $envName).frame(width: 120)
                     Button { Task { await create() } } label: { Label("Create", systemImage: "key.fill") }
-                        .bdButton(.primary).disabled(name.isEmpty || state.cliPath == nil)
+                        .bdButton(.primary).disabled(name.isEmpty)
                 }
                 if state.cliPath == nil {
-                    Label("Creating keys needs a browser-session credential — install the boat CLI (Settings › CLI).", systemImage: "info.circle")
+                    Label("Uses your admin key if it can, otherwise the boat CLI (Settings › CLI).", systemImage: "info.circle")
                         .font(.bdSmall).foregroundStyle(BD.text3)
                 }
             }
@@ -355,9 +355,11 @@ struct APIKeysView: View {
                             VStack(alignment: .leading, spacing: 3) {
                                 HStack(spacing: 6) {
                                     Text(k.displayName).font(.system(size: 13, weight: .semibold)).foregroundStyle(BD.text)
-                                    if let p = k["prefix"] { Chip(text: p + "…", mono: true) }
+                                    if let p = k["keyPrefix", "prefix"] { Chip(text: p + "…" + (k["keyLastFour"] ?? ""), mono: true) }
+                                    if k.json["expired"]?.bool == true { Chip(text: "expired", icon: "exclamationmark.triangle") }
+                                    else if k.json["expiringSoon"]?.bool == true { Chip(text: "expiring soon", icon: "clock") }
                                 }
-                                Text([k["preset", "scope"], k["expiresAt", "expiry"].map { "expires " + relative($0) }, k["lastUsedAt"].map { "used " + relative($0) }]
+                                Text([scopeText(k), k.json["usage"]?["requests"]?.int.map { "\($0) requests / 30d" }, k["expiresAt", "expiry"].map { "expires " + relative($0) }, k["lastUsedAt"].map { "used " + relative($0) }]
                                         .compactMap { $0 }.joined(separator: " · "))
                                     .font(.bdSmall).foregroundStyle(BD.text3)
                             }
@@ -408,12 +410,36 @@ struct APIKeysView: View {
     }
 
     func create() async {
+        // Try the REST endpoint first (works with an admin-scoped key); fall back to the CLI.
+        var body: [String: JSON] = ["name": .string(name), "preset": .string(preset)]
+        if let d = Int(ttlDays) { body["ttlDays"] = .number(Double(d)) }
+        if !sandbox.isEmpty { body["sandboxId"] = .string(sandbox) }
+        if !envName.isEmpty { body["environment"] = .string(envName) }
+        if let r = try? await state.api.call("POST", "/api-keys/scoped", body: .object(body)),
+           let s = r.first("key", "secret", "token")?.string ?? r["apiKey"]?.first("key", "secret", "token")?.string {
+            state.toast("Key created")
+            showSecret("API key", s)
+            name = ""
+            await reload()
+            return
+        }
+        guard state.cliPath != nil else {
+            state.toast("Creating keys needs an admin key or the boat CLI", error: true)
+            return
+        }
         var args = ["api-key", "create", name, "--preset", preset, "--json"]
         if !ttlDays.isEmpty { args += ["--ttl", ttlDays] }
         if !sandbox.isEmpty { args += ["--sandbox", sandbox] }
         if !envName.isEmpty { args += ["--env", envName] }
         if let r = await state.cli("Key created", args), r.exitCode == 0 { revealSecret(r); name = "" }
         await reload()
+    }
+
+    func scopeText(_ k: Record) -> String? {
+        let acts = (k.json["scope"]?["actions"]?.array ?? []).compactMap { $0.string }
+        if acts == ["*"] { return "full access" }
+        if acts.isEmpty { return k["preset"] }
+        return acts.count <= 3 ? acts.joined(separator: ", ") : "\(acts.count) actions"
     }
 
     func revealSecret(_ r: CLIResult) {

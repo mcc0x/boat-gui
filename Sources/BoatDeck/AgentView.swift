@@ -37,6 +37,9 @@ struct AgentView: View {
     @VState private var sending = false
     @VState private var showRaw = false
     @VState private var working = false
+    @VState private var setup: SetupHint?
+
+    struct SetupHint: Equatable { let message: String; let url: URL }
 
     var selectedConvo: String? { convoSel == "__all__" ? nil : convoSel }
 
@@ -47,6 +50,21 @@ struct AgentView: View {
                 chatHeader
                 Hairline()
                 transcript
+                if let setup {
+                    HStack(spacing: 10) {
+                        Image(systemName: "key.horizontal").foregroundStyle(BD.amber)
+                        Text(setup.message).font(.bdSmall).foregroundStyle(BD.text).fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 8)
+                        Button { NSWorkspace.shared.open(setup.url) } label: { Label("Set up agent", systemImage: "arrow.up.right") }
+                            .bdButton(.primary, .small)
+                        IconButton(icon: "xmark", size: 22) { withAnimation(BD.snappy) { self.setup = nil } }
+                    }
+                    .padding(12)
+                    .background(BD.amber.opacity(0.1), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(BD.amber.opacity(0.3), lineWidth: 1))
+                    .padding(.horizontal, 14)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
                 composer
             }
             .glassCard(padding: 0)
@@ -116,7 +134,7 @@ struct AgentView: View {
         HStack(spacing: 10) {
             HStack(spacing: 6) {
                 StatusDot(state: streaming ? "running" : "archived", size: 6)
-                Text(streaming ? "Live" : "Reconnecting…").font(.bdSmall).foregroundStyle(BD.text2)
+                Text(streaming ? (working ? "Agent working…" : "Live") : "Connecting…").font(.bdSmall).foregroundStyle(BD.text2)
             }
             if newConvo { Chip(text: "new conversation", icon: "sparkle") }
             Spacer()
@@ -232,21 +250,36 @@ struct AgentView: View {
 
     // MARK: Streaming
 
+    /// boat.dev serves events as a paginated list, so we poll it and append anything new.
     func connect() {
         streamTask?.cancel()
         let convo = selectedConvo
         streamTask = Task {
+            var seen = Set<String>()
+            var first = true
             while !Task.isCancelled {
-                streaming = true
                 do {
-                    for try await ev in state.api.events(id, convo: convo, follow: true) { ingest(ev) }
+                    let r = try await state.api.call("GET", state.api.sb(id) + "/events",
+                                                     query: ["conversation": convo, "limit": "100"])
+                    var list = r.list("events")
+                    // Oldest first, whatever order the server used.
+                    let ts: (JSON) -> String = { $0.first("createdAt", "timestamp", "time", "ts")?.string ?? "" }
+                    if list.count > 1, ts(list[0]) > ts(list[list.count - 1]) { list.reverse() }
+                    for ev in list {
+                        let key = ev.first("id", "eventId", "seq")?.string ?? ev.compact
+                        if seen.insert(key).inserted { ingest(ev) }
+                    }
+                    if first, list.isEmpty { working = false }
+                    first = false
+                    streaming = true
                 } catch {
-                    if !Task.isCancelled, !(error is CancellationError) {
-                        events.append(AgentEvent(kind: "error", convo: nil, text: "Event stream: \(error.localizedDescription)", raw: .null))
+                    streaming = false
+                    if !Task.isCancelled, let e = error as? BoatError, e.status == 403 {
+                        events.append(AgentEvent(kind: "error", convo: nil, text: "This API key can't read agent events (\(e.message)).", raw: e.json ?? .null))
+                        return
                     }
                 }
-                streaming = false
-                try? await Task.sleep(nanoseconds: 4_000_000_000)
+                try? await Task.sleep(nanoseconds: (working ? 1_500_000_000 : 4_000_000_000))
             }
         }
     }
@@ -297,11 +330,24 @@ struct AgentView: View {
         if newConvo { b["new"] = true } else if let c = selectedConvo { b["conversationId"] = .string(c) }
         withAnimation(BD.spring) { events.append(AgentEvent(kind: "you", convo: selectedConvo, text: text, raw: .object(b))) }
         prompt = ""
-        if let r = await state.run("Prompt queued", refresh: false, { try await $0.prompt(id, .object(b)) }) {
+        do {
+            let r = try await state.api.prompt(id, .object(b))
+            withAnimation(BD.snappy) { setup = nil }
+            state.toast("Prompt queued")
             working = true
             newConvo = false
             await loadConvos()
             if let c = r["conversationId"]?.string, selectedConvo != nil, selectedConvo != c { convoSel = c }
+        } catch let e as BoatError {
+            if let url = e.setupURL {
+                withAnimation(BD.spring) { setup = SetupHint(message: e.message, url: url) }
+            } else {
+                state.toast("Prompt failed — \(e.localizedDescription)", error: true)
+            }
+            prompt = text
+        } catch {
+            state.toast("Prompt failed — \(error.localizedDescription)", error: true)
+            prompt = text
         }
     }
 

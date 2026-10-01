@@ -30,6 +30,28 @@ enum Keychain {
     }
 }
 
+// MARK: - Credential file
+
+/// API key stored at ~/Library/Application Support/BoatDeck/credentials (mode 0600), like most CLIs do.
+/// Unlike an ad-hoc-signed app's Keychain item, this never triggers an access prompt after rebuilds.
+enum Credentials {
+    static var url: URL {
+        let d = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/BoatDeck")
+        try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        return d.appendingPathComponent("credentials")
+    }
+    static func load() -> String? {
+        guard let s = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? nil : t
+    }
+    static func save(_ key: String) {
+        if key.isEmpty { try? FileManager.default.removeItem(at: url); return }
+        try? key.write(to: url, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
+}
+
 // MARK: - boat CLI bridge
 
 struct CLIResult {

@@ -113,7 +113,7 @@ struct CommandPalette: View {
                                 .padding(.horizontal, 10).padding(.vertical, 6)
                                 .background(i == index ? BD.surface : .clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                                 .contentShape(Rectangle())
-                                .onTapGesture { index = i; run(list) }
+                                .tapAction { index = i; run(list) }
                                 .onHover { if $0 { index = i } }
                                 .id(i)
                             }

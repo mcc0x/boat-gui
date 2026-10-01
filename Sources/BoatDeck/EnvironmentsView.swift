@@ -23,15 +23,15 @@ struct EnvironmentsView: View {
                         }
                         ForEach(Array(state.environments.enumerated()), id: \.element.id) { i, e in
                             EnvRow(env: e, selected: selected == e.id)
-                                .onTapGesture { withAnimation(BD.spring) { selected = e.id } }
+                                .tapAction { withAnimation(BD.spring) { selected = e.id } }
                                 .appear(delay: 0.03 * Double(i))
                         }
                     }
                 }
                 .scrollContentBackground(.hidden)
             }
-            .padding(.horizontal, 20).padding(.top, 40).padding(.bottom, 20)
-            .frame(width: 320)
+            .padding(.horizontal, 16).padding(.top, 40).padding(.bottom, 20)
+            .frame(width: 264)
             Rectangle().fill(BD.stroke).frame(width: 1)
 
             Group {
@@ -78,7 +78,7 @@ struct EnvRow: View {
                     Text(env.displayName).font(.system(size: 13, weight: .semibold)).foregroundStyle(BD.text)
                     if env.json["isDefault"]?.bool == true { Chip(text: "default") }
                 }
-                Text("v\(env["version"] ?? "1") · \(env.json["vars"]?.array?.count ?? 0) vars · \(env.json["repos"]?.array?.count ?? 0) repos")
+                Text("v\(env.envVersion) · \(env.envVars.count) vars · \(env.envRepos.count) repos")
                     .font(.bdSmall).foregroundStyle(BD.text3)
             }
             Spacer()
@@ -108,7 +108,7 @@ struct EnvironmentDetail: View {
 
     var body: some View {
         Page {
-            PageHeader(title: name, subtitle: "Version \(env["version"] ?? "1")\(env.json["isDefault"]?.bool == true ? " · default environment" : "")") {
+            PageHeader(title: name, subtitle: "Version \(env.envVersion)\(env.json["isDefault"]?.bool == true ? " · default environment" : "")") {
                 HStack(spacing: 8) {
                     if env.json["isDefault"]?.bool != true {
                         Button("Make default") { Task { await state.cli("Default set", ["env", "default", name]); await reload() } }.bdButton()
@@ -133,55 +133,9 @@ struct EnvironmentDetail: View {
             }
             .appear()
 
-            HStack(alignment: .top, spacing: 14) {
-                section("Access", "lock.shield") {
-                    VStack(spacing: 10) {
-                        flagToggle("GitHub access", "Clone private repos", key: "github", cliFlag: "--github")
-                        Hairline()
-                        flagToggle("Account secrets", "Expose your saved secrets", key: "secrets", cliFlag: "--secrets")
-                        Hairline()
-                        flagToggle("Safe for third parties", "Allow sharing with collaborators", key: "safeForThirdParties", cliFlag: "--safe-for-third-parties", topLevel: true)
-                        ForEach((flags.object ?? [:]).keys.sorted().filter { !["github", "secrets"].contains($0) }, id: \.self) { k in
-                            Hairline()
-                            KVRow(key: k, value: flags[k]?.string)
-                        }
-                    }
-                }
-                section("Repositories", "chevron.left.forwardslash.chevron.right") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        let repos = env.json["repos"]?.array ?? []
-                        if repos.isEmpty { Text("No repositories yet.").font(.bdSmall).foregroundStyle(BD.text3) }
-                        ForEach(repos, id: \.self) { r in
-                            let n = r.first("name", "fullName", "repo")?.string ?? r.compact
-                            let rid = r.first("id", "repositoryId", "databaseId")?.string ?? n
-                            HStack {
-                                Image(systemName: "arrow.triangle.branch").foregroundStyle(BD.text3)
-                                Text(n).font(.system(size: 12.5, weight: .medium)).foregroundStyle(BD.text)
-                                if let b = r.first("branch", "baseBranch")?.string { Chip(text: b, mono: true) }
-                                Spacer()
-                                IconButton(icon: "trash", size: 24) {
-                                    Task { await state.runOrCLI("Removed \(n)", cli: ["env", "rm-repo", name, n]) { try await $0.removeRepo(envId, repoId: rid) }; await reload() }
-                                }
-                            }
-                        }
-                        HStack {
-                            if availableRepos.isEmpty {
-                                Field(placeholder: "owner/repo", text: $repoInput, mono: true)
-                            } else {
-                                Picker("", selection: $repoInput) {
-                                    Text("Choose a repository…").tag("")
-                                    ForEach(availableRepos) { r in
-                                        let n = r["fullName", "nameWithOwner", "name"] ?? r.id
-                                        Text(n).tag(n)
-                                    }
-                                }
-                                .labelsHidden()
-                            }
-                            Field(placeholder: "branch", text: $repoBranch, mono: true).frame(width: 100)
-                            Button("Add") { Task { await addRepo() } }.bdButton(.primary, .small).disabled(repoInput.isEmpty)
-                        }
-                    }
-                }
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 14) { accessSection; reposSection }.frame(minWidth: 820)
+                VStack(spacing: 14) { accessSection; reposSection }
             }
             .appear(delay: 0.05)
 
@@ -189,12 +143,12 @@ struct EnvironmentDetail: View {
                 Toggle("Reveal values", isOn: $reveal.animation(BD.soft)).toggleStyle(.switch).controlSize(.mini).font(.bdSmall)
             )) {
                 VStack(spacing: 0) {
-                    ForEach(env.json["vars"]?.array ?? [], id: \.self) { v in
-                        let k = v.first("key", "name")?.string ?? v.string ?? "?"
+                    if env.envVars.isEmpty { Text("No variables yet.").font(.bdSmall).foregroundStyle(BD.text3).frame(maxWidth: .infinity, alignment: .leading).padding(.bottom, 6) }
+                    ForEach(env.envVars, id: \.0) { (k, val) in
                         HStack {
                             Text(k).font(.bdMono).foregroundStyle(BD.text)
                             Spacer()
-                            Text(reveal ? (v["value"]?.string ?? "•••") : "••••••••").font(.bdMonoSmall).foregroundStyle(BD.text2)
+                            Text(reveal ? val : "••••••••").font(.bdMonoSmall).foregroundStyle(BD.text2)
                                 .textSelection(.enabled).lineLimit(1).frame(maxWidth: 360, alignment: .trailing)
                             IconButton(icon: "trash", size: 24) {
                                 Task { await state.runOrCLI("Removed \(k)", cli: ["env", "rm-var", name, k]) { try await $0.removeVar(envId, key: k) }; await reload() }
@@ -242,6 +196,60 @@ struct EnvironmentDetail: View {
         .task { availableRepos = (try? await state.api.repos()) ?? [] }
     }
 
+    var accessSection: some View {
+                section("Access", "lock.shield") {
+                    VStack(spacing: 10) {
+                        flagToggle("GitHub access", "Pass your GitHub login so private repos clone", key: "passGithub", cliFlag: "--github", topLevel: true)
+                        Hairline()
+                        flagToggle("Account secrets", "Expose your saved secrets", key: "passSecrets", cliFlag: "--secrets", topLevel: true)
+                        Hairline()
+                        flagToggle("Sandbox credentials", "Pass boat credentials into the sandbox", key: "passSandboxCredentials", cliFlag: "", topLevel: true)
+                        Hairline()
+                        flagToggle("Agent credentials", "Pass Claude Code / Codex logins to agents", key: "passAgentsCredentials", cliFlag: "", topLevel: true)
+                        Hairline()
+                        flagToggle("Safe for third parties", "Allow sharing with collaborators", key: "safeForThirdParties", cliFlag: "--safe-for-third-parties", topLevel: true)
+                    }
+                }
+    }
+
+    var reposSection: some View {
+                section("Repositories", "chevron.left.forwardslash.chevron.right") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        let repos = env.envRepos
+                        if repos.isEmpty { Text("No repositories yet.").font(.bdSmall).foregroundStyle(BD.text3) }
+                        ForEach(repos, id: \.self) { r in
+                            let n = r.first("name", "fullName", "repo")?.string ?? r.compact
+                            let rid = r.first("id", "repositoryId", "databaseId")?.string ?? n
+                            HStack {
+                                Image(systemName: "arrow.triangle.branch").foregroundStyle(BD.text3)
+                                Text(n).font(.system(size: 12.5, weight: .medium)).foregroundStyle(BD.text)
+                                if let b = r.first("branch", "baseBranch")?.string { Chip(text: b, mono: true) }
+                                Spacer()
+                                IconButton(icon: "trash", size: 24) {
+                                    Task { await state.runOrCLI("Removed \(n)", cli: ["env", "rm-repo", name, n]) { try await $0.removeRepo(envId, repoId: rid) }; await reload() }
+                                }
+                            }
+                        }
+                        HStack {
+                            if availableRepos.isEmpty {
+                                Field(placeholder: "owner/repo", text: $repoInput, mono: true)
+                            } else {
+                                Picker("", selection: $repoInput) {
+                                    Text("Choose a repository…").tag("")
+                                    ForEach(availableRepos) { r in
+                                        let n = r["fullName", "nameWithOwner", "name"] ?? r.id
+                                        Text(n).tag(n)
+                                    }
+                                }
+                                .labelsHidden()
+                            }
+                            Field(placeholder: "branch", text: $repoBranch, mono: true).frame(width: 100)
+                            Button("Add") { Task { await addRepo() } }.bdButton(.primary, .small).disabled(repoInput.isEmpty)
+                        }
+                    }
+                }
+    }
+
     func section<C: View>(_ title: String, _ icon: String, trailing: AnyView? = nil, @ViewBuilder _ c: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
@@ -258,22 +266,29 @@ struct EnvironmentDetail: View {
 
     func flagToggle(_ label: String, _ sub: String, key: String, cliFlag: String, topLevel: Bool = false) -> some View {
         let current = (topLevel ? env.json[key] : flags[key])?.bool ?? false
-        return Toggle(isOn: Binding(get: { current }, set: { v in
-            Task {
-                var body: [String: JSON] = [:]
-                if topLevel { body[key] = .bool(v) } else { body["flags"] = .object([key: .bool(v)]) }
-                await state.runOrCLI("\(label) \(v ? "on" : "off")", cli: ["env", "set", name, cliFlag, v ? "true" : "false"]) {
-                    try await $0.updateEnvironment(envId, .object(body))
-                }
-                await reload()
-            }
-        })) {
+        return HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 1) {
                 Text(label).font(.system(size: 12.5, weight: .medium)).foregroundStyle(BD.text)
                 Text(sub).font(.bdSmall).foregroundStyle(BD.text3)
             }
+            Spacer(minLength: 8)
+            Toggle("", isOn: Binding(get: { current }, set: { v in
+                Task {
+                    var body: [String: JSON] = [:]
+                    if topLevel { body[key] = .bool(v) } else { body["flags"] = .object([key: .bool(v)]) }
+                    let msg = "\(label) \(v ? "on" : "off")"
+                    if cliFlag.isEmpty {
+                        await state.run(msg, refresh: false) { try await $0.updateEnvironment(envId, .object(body)) }
+                    } else {
+                        await state.runOrCLI(msg, cli: ["env", "set", name, cliFlag, v ? "true" : "false"]) {
+                            try await $0.updateEnvironment(envId, .object(body))
+                        }
+                    }
+                    await reload()
+                }
+            }))
+            .toggleStyle(.switch).labelsHidden()
         }
-        .toggleStyle(.switch)
     }
 
     func setVar() async {
@@ -309,4 +324,23 @@ struct EnvironmentDetail: View {
         }
         await reload()
     }
+}
+
+extension Record {
+    /// Variables: either a `vars` array or KEY=VALUE lines in `envContents`.
+    var envVars: [(String, String)] {
+        if let a = json["vars"]?.array {
+            return a.map { ($0.first("key", "name")?.string ?? "?", $0["value"]?.string ?? "") }
+        }
+        let text = json["envContents"]?.string ?? ""
+        return text.split(separator: "\n").compactMap { line in
+            let l = line.trimmingCharacters(in: .whitespaces)
+            guard !l.isEmpty, !l.hasPrefix("#"), let eq = l.firstIndex(of: "=") else { return nil }
+            var v = String(l[l.index(after: eq)...])
+            if v.count >= 2, (v.hasPrefix("\"") && v.hasSuffix("\"")) || (v.hasPrefix("'") && v.hasSuffix("'")) { v = String(v.dropFirst().dropLast()) }
+            return (String(l[..<eq]).replacingOccurrences(of: "export ", with: ""), v)
+        }
+    }
+    var envRepos: [JSON] { json.first("selectedRepositories", "repos")?.array ?? [] }
+    var envVersion: String { self["latestVersionNumber", "version"] ?? "1" }
 }
