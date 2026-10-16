@@ -46,7 +46,7 @@ CI builds and tests Apple Silicon and Intel using Xcode 26.2. Local Command Line
 ## Build & install
 
 ```sh
-git clone https://github.com/moneycaringcoder/boat-gui.git
+git clone https://github.com/mcc0x/boat-gui.git
 cd boat-gui
 ./build.sh            # or: make
 ```
